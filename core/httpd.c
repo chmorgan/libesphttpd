@@ -16,6 +16,8 @@ Http server - core routines
 #include <libesphttpd/esp.h>
 #endif
 
+#include <strings.h>
+
 #include "libesphttpd/httpd.h"
 #include "httpd-platform.h"
 

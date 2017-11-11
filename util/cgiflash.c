@@ -267,7 +267,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 					spi_flash_erase_sector(state->address/SPI_FLASH_SEC_SIZE);
 				}
 				//Write page
-				httpd_printf("Writing %d bytes of data to SPI pos 0x%x...\n", state->pagePos, state->address);
+				//httpd_printf("Writing %d bytes of data to SPI pos 0x%x...\n", state->pagePos, state->address);
 				spi_flash_write(state->address, (uint32 *)state->pageData, state->pagePos);
 				state->address+=PAGELEN;
 				state->pagePos=0;

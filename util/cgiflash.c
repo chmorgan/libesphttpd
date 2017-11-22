@@ -343,15 +343,12 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 					}
 				}
 			} else if (def->type==CGIFLASH_TYPE_FW && checkBinHeader(connData->post->buff)) {
-				uint32_t offset, size;
-				esp32flashGetUpdateMem(&offset, &size);
-//				printf("Writing to partition @ %x, size %d\n", offset, size);
-				if (connData->post->len > size) {
+				if (connData->post->len > def->fwSize) {
 					state->err="Firmware image too large";
 					state->state=FLST_ERROR;
 				} else {
 					state->len=connData->post->len;
-					state->address=offset;
+					state->address=def->fw1Pos;
 					state->state=FLST_WRITE;
 				}
 			} else if (def->type==CGIFLASH_TYPE_ESPFS && checkEspfsHeader(connData->post->buff)) {
@@ -434,8 +431,6 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			httpdSend(connData, "Firmware image error:", -1);
 			httpdSend(connData, state->err, -1);
 			httpdSend(connData, "\n", -1);
-		} else {
-			esp32flashSetOtaAsCurrentImage();
 		}
 		free(state);
 		return HTTPD_CGI_DONE;

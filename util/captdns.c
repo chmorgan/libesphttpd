@@ -240,10 +240,33 @@ static void ICACHE_FLASH_ATTR captdnsRecv(struct sockaddr_in *premote_addr, char
 			struct ip_info info;
 			wifi_get_ip_info(SOFTAP_IF, &info);
 #endif
-			*rend++=ip4_addr1(&info.ip);
-			*rend++=ip4_addr2(&info.ip);
-			*rend++=ip4_addr3(&info.ip);
-			*rend++=ip4_addr4(&info.ip);
+			/*
+			 * Captive portal addresses:
+			 *
+			 * Apple iOS: 	http://captive.apple.com/hotspot-detect.html
+			 * Android:	http://clients3.google.com/generate_204
+			 * Android 5+:	http://connectivitycheck.android.com/generate_204
+			 * Windows:	http://www.msftncsi.com/ncsi.txt
+			 * Windows 10:	http://www.msftconnecttest.com/redirect
+			 *
+			 * If so, return current IP, otherwise return 0.0.0.0
+			 */
+			if ((strcmp(buff, "captive.apple.com")==0) || (strcmp(buff, "clients3.google.com")==0) || (strcmp(buff, "connectivitycheck.android.com")==0) || (strcmp(buff, "www.msftncsi.com")==0) || (strcmp(buff, "www.msftconnecttest.com")==0)) {
+				*rend++=ip4_addr1(&info.ip);
+				*rend++=ip4_addr2(&info.ip);
+				*rend++=ip4_addr3(&info.ip);
+				*rend++=ip4_addr4(&info.ip);
+			} else if(strcmp(buff, "dns.msftncsi.com")==0) {
+				*rend++=131;
+				*rend++=107;
+				*rend++=255;
+				*rend++=255;
+			} else {
+				*rend++=0;
+				*rend++=0;
+				*rend++=0;
+				*rend++=0;
+			}
 			setn16(&rhdr->ancount, ntohs(rhdr->ancount)+1);
 			ESP_LOGD(TAG, "Added A rec to resp. Resp len is %d", (rend-reply));
 		} else if (ntohs(qf->type)==QTYPE_NS) {

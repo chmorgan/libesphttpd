@@ -11,4 +11,9 @@ CgiStatus cgiWiFiSetMode(HttpdConnData *connData);
 CgiStatus cgiWiFiSetChannel(HttpdConnData *connData);
 CgiStatus cgiWiFiConnStatus(HttpdConnData *connData);
 
+#ifdef ESP32
+void wifiScanDoneCb();
+#endif
+
+
 #endif

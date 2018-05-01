@@ -166,7 +166,6 @@ static void ICACHE_FLASH_ATTR wifiStartScan() {
 //scan for access points and if available will return the result of an earlier scan.
 //The result is embedded in a bit of JSON parsed by the javascript in wifi.tpl.
 CgiStatus ICACHE_FLASH_ATTR cgiWiFiScan(HttpdConnData *connData) {
-//#ifndef ESP32
 	int pos=(int)connData->cgiData;
 	int len;
 	char buff[1024];
@@ -209,9 +208,6 @@ CgiStatus ICACHE_FLASH_ATTR cgiWiFiScan(HttpdConnData *connData) {
 		connData->cgiData=(void *)1;
 		return HTTPD_CGI_MORE;
 	}
-//#else
-//	return HTTPD_CGI_DONE;
-//#endif
 }
 
 #ifndef ESP32
@@ -292,8 +288,8 @@ CgiStatus ICACHE_FLASH_ATTR cgiWiFiConnect(HttpdConnData *connData) {
 	os_timer_setfn(&reassTimer, reassTimerCb, NULL);
 //Set to 0 if you want to disable the actual reconnecting bit
 #else
-	strncpy((char*)wifi_config.sta.ssid, essid, 32);
-	strncpy((char*)wifi_config.sta.password, passwd, 64);
+	strncpy((char*)wifi_config.sta.ssid, essid, sizeof(wifi_config.sta.ssid));
+	strncpy((char*)wifi_config.sta.password, passwd, sizeof(wifi_config.sta.password));
 	ESP_LOGI(TAG, "Try to connect to AP %s pw %s", essid, passwd);
 #endif
 	connTryStatus = CONNTRY_WORKING;

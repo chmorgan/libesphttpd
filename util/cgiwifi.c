@@ -12,10 +12,12 @@ Cgi/template routines for the /wifi url.
 #ifdef ESP32
 #include "esp_wifi_types.h"
 #include "esp_wifi.h"
+#include "esp_log.h"
+static const char *TAG = "cgiwifi";
+#define NUM_APS 16
 #endif
 //Enable this to disallow any changes in AP settings
 //#define DEMO_MODE
-//#ifndef ESP32
 
 //WiFi access point data
 typedef struct {
@@ -112,9 +114,9 @@ void ICACHE_FLASH_ATTR wifiScanDoneCb(void *arg, STATUS status) {
 #else
 
 void ICACHE_FLASH_ATTR wifiScanDoneCb() {
-	uint16_t num_aps = 16;
-	wifi_ap_record_t ap_records[16];
-	//httpd_printf("wifiScanDoneCb (ESP32)\n");
+	uint16_t num_aps = NUM_APS;
+	wifi_ap_record_t ap_records[NUM_APS];
+	ESP_LOGI(TAG, "wifiScanDoneCb");
 	if (cgiWifiAps.apData!=NULL) {
 		for (int n=0; n<cgiWifiAps.noAps; n++) free(cgiWifiAps.apData[n]);
 		free(cgiWifiAps.apData);
@@ -122,7 +124,7 @@ void ICACHE_FLASH_ATTR wifiScanDoneCb() {
 	ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&num_aps, ap_records));
 	cgiWifiAps.apData=(ApData **)malloc(sizeof(ApData *)*num_aps);
 	cgiWifiAps.noAps=num_aps;
-	//httpd_printf("Scan done: found %d APs\n", num_aps);
+	ESP_LOGI(TAG, "Scan done: found %d APs", num_aps);
 	for (int i = 0; i < num_aps; i++) {
 		cgiWifiAps.apData[i]=(ApData *)malloc(sizeof(ApData));
 		cgiWifiAps.apData[i]->rssi=ap_records[i].rssi;
@@ -143,9 +145,7 @@ static void ICACHE_FLASH_ATTR wifiStartScan() {
 	cgiWifiAps.scanInProgress=1;
 	wifi_station_scan(NULL, wifiScanDoneCb);
 #else
-	//httpd_printf("wifiStartScan (ESP32)\n");
-	//esp_wifi_set_mode(WIFI_MODE_APSTA);
-	// ESP32 scan handling
+	ESP_LOGI(TAG, "wifiStartScan");
 	if (cgiWifiAps.scanInProgress) return;
 	cgiWifiAps.scanInProgress=1;
 	wifi_scan_config_t wsc = {
@@ -258,16 +258,13 @@ static void ICACHE_FLASH_ATTR reassTimerCb(void *arg) {
 // ESP32
 wifi_config_t wifi_config;
 static void ICACHE_FLASH_ATTR startSta() {
-	//esp_wifi_stop();
-	//esp_wifi_set_mode(WIFI_MODE_STA);
 	esp_wifi_set_auto_connect(1);
 	esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
 	esp_wifi_set_mode(WIFI_MODE_APSTA);
 	ESP_ERROR_CHECK( esp_wifi_connect());
-	//esp_wifi_start();
 	connTryStatus = CONNTRY_SUCCESS;
-	//httpd_printf("wifi_init_sta finished.\n");
-	//httpd_printf("connect to ap SSID:%s\n", (char *)wifi_config.sta.ssid);
+	ESP_LOGI(TAG, "wifi_init_sta finished");
+	ESP_LOGI(TAG, "connect to ap SSID:%s", (char *)wifi_config.sta.ssid);
 }
 #endif
 
@@ -297,8 +294,8 @@ CgiStatus ICACHE_FLASH_ATTR cgiWiFiConnect(HttpdConnData *connData) {
 #else
 	strncpy((char*)wifi_config.sta.ssid, essid, 32);
 	strncpy((char*)wifi_config.sta.password, passwd, 64);
+	ESP_LOGI(TAG, "Try to connect to AP %s pw %s", essid, passwd);
 #endif
-	//httpd_printf("Try to connect to AP %s pw %s\n", essid, passwd);
 	connTryStatus = CONNTRY_WORKING;
 #ifdef DEMO_MODE
 	httpdRedirect(connData, "/wifi");
@@ -329,7 +326,6 @@ CgiStatus ICACHE_FLASH_ATTR cgiWiFiSetMode(HttpdConnData *connData) {
 
 	len=httpdFindArg(connData->getArgs, "mode", buff, sizeof(buff));
 	if (len!=0) {
-		//httpd_printf("cgiWifiSetMode: %s\n", buff);
 #ifndef DEMO_MODE
 #ifndef ESP32
 		wifi_set_opmode(atoi(buff));
@@ -359,16 +355,16 @@ CgiStatus ICACHE_FLASH_ATTR cgiWiFiSetChannel(HttpdConnData *connData) {
 
 	len=httpdFindArg(connData->getArgs, "ch", buff, sizeof(buff));
 	if (len!=0) {
-		//httpd_printf("cgiWifiSetChannel: %s\n", buff);
 		int channel = atoi(buff);
 		if (channel > 0 && channel < 15) {
-			//httpd_printf("Setting ch=%d\n", channel);
 #ifndef ESP32
+			httpd_printf("cgiWifiSetChannel: %s\n", buff);
 			struct softap_config wificfg;
 			wifi_softap_get_config(&wificfg);
 			wificfg.channel = (uint8)channel;
 			wifi_softap_set_config(&wificfg);
 #else
+			ESP_LOGI(TAG, "Setting ch=%d", channel);
 			wifi_config_t wificfg;
 			esp_wifi_get_config(ESP_IF_WIFI_AP, &wificfg);
 			wificfg.ap.channel = (uint8)channel;

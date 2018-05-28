@@ -13,16 +13,21 @@ Cgi/template routines for the /wifi url.
 #include "esp_wifi_types.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
+
 static const char *TAG = "cgiwifi";
-#define NUM_APS 16
+#define MAX_NUM_APS 16
 #endif
+
+#define SSID_SIZE	32
+#define BSSID_SIZE	6
+
 //Enable this to disallow any changes in AP settings
 //#define DEMO_MODE
 
 //WiFi access point data
 typedef struct {
-	char ssid[32];
-	char bssid[8];
+	char ssid[SSID_SIZE + 1];
+	char bssid[BSSID_SIZE];
 	int channel;
 	char rssi;
 	char enc;
@@ -113,28 +118,109 @@ void ICACHE_FLASH_ATTR wifiScanDoneCb(void *arg, STATUS status) {
 
 #else
 
-void ICACHE_FLASH_ATTR wifiScanDoneCb() {
-	uint16_t num_aps = NUM_APS;
-	wifi_ap_record_t ap_records[NUM_APS];
-	ESP_LOGI(TAG, "wifiScanDoneCb");
-	if (cgiWifiAps.apData!=NULL) {
-		for (int n=0; n<cgiWifiAps.noAps; n++) free(cgiWifiAps.apData[n]);
+// Helper function for releasing collected AP scan data
+static void ICACHE_FLASH_ATTR freeApData(void) {
+	unsigned int idx;
+
+	if (cgiWifiAps.apData != NULL) {
+		for (idx = 0; idx < cgiWifiAps.noAps; ++idx){
+			if(cgiWifiAps.apData[idx] != NULL){
+				free(cgiWifiAps.apData[idx]);
+			}
+		}
+
 		free(cgiWifiAps.apData);
 	}
-	ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&num_aps, ap_records));
-	cgiWifiAps.apData=(ApData **)malloc(sizeof(ApData *)*num_aps);
-	cgiWifiAps.noAps=num_aps;
-	ESP_LOGI(TAG, "Scan done: found %d APs", num_aps);
-	for (int i = 0; i < num_aps; i++) {
-		cgiWifiAps.apData[i]=(ApData *)malloc(sizeof(ApData));
-		cgiWifiAps.apData[i]->rssi=ap_records[i].rssi;
-		cgiWifiAps.apData[i]->channel=ap_records[i].primary;
-		cgiWifiAps.apData[i]->enc=ap_records[i].authmode;
-		strncpy(cgiWifiAps.apData[i]->ssid,  (char *)ap_records[i].ssid, 32);
-		strncpy(cgiWifiAps.apData[i]->bssid, (char *)ap_records[i].bssid, 6);
-	}
-	cgiWifiAps.scanInProgress=0;
 
+	cgiWifiAps.apData = NULL;
+	cgiWifiAps.noAps = 0;
+}
+
+void ICACHE_FLASH_ATTR wifiScanDoneCb() {
+	uint16_t num_aps;
+	wifi_ap_record_t *ap_records;
+	ApData *ap_data;
+	unsigned int idx;
+	esp_err_t result;
+
+	ESP_LOGI(TAG, "wifiScanDoneCb");
+
+	result = ESP_OK;
+	ap_records = NULL;
+
+	// Release old data before fetching new set
+	freeApData();
+
+	// Fetch number of APs found. Bail out early if there is nothing to get.
+	result = esp_wifi_scan_get_ap_num(&num_aps);
+	if(result != ESP_OK || num_aps == 0){
+		ESP_LOGI(TAG, "Scan error or empty scan result");
+		goto err_out;
+	}
+
+	// Limit number of records to fetch. Prevents possible DoS by tricking
+	// us into allocating storage for a very large amount of scan results.
+	if(num_aps > MAX_NUM_APS){
+		ESP_LOGI(TAG, "Limiting AP records to %d (Actually found %d)",
+		         MAX_NUM_APS, num_aps);
+		num_aps = MAX_NUM_APS;
+	}
+
+	ap_records = malloc(num_aps * sizeof(*ap_records));
+	if(ap_records == NULL){
+		ESP_LOGE(TAG, "Out of memory for fetching records");
+		goto err_out;
+	}
+
+	// Fetch actual AP scan data
+	result = esp_wifi_scan_get_ap_records(&num_aps, ap_records);
+	if(result != ESP_OK){
+		ESP_LOGE(TAG, "Error getting scan results");
+		goto err_out;
+	}
+
+	// Allocate zeroed memory for apData pointer array
+	cgiWifiAps.apData = (ApData **) calloc(sizeof(ApData *), num_aps);
+	if(cgiWifiAps.apData == NULL){
+		ESP_LOGE(TAG, "Out of memory for storing records");
+		result = ESP_ERR_NO_MEM;
+		goto err_out;
+	}
+
+	ESP_LOGI(TAG, "Scan done: found %d APs", num_aps);
+
+	// Allocate and fill apData entries for retrieved scan results
+	for(idx = 0; idx < num_aps; ++idx) {
+		cgiWifiAps.apData[idx] = (ApData *) malloc(sizeof(ApData));
+		if(cgiWifiAps.apData[idx] == NULL){
+			ESP_LOGE(TAG, "Out of memory while copying AP data");
+			result = ESP_ERR_NO_MEM;
+			goto err_out;
+		}
+
+		++cgiWifiAps.noAps;
+
+		ap_data = cgiWifiAps.apData[idx];
+		ap_data->rssi = ap_records[idx].rssi;
+		ap_data->channel = ap_records[idx].primary;
+		ap_data->enc = ap_records[idx].authmode;
+		strlcpy(ap_data->ssid, (const char *) ap_records[idx].ssid,  sizeof(ap_data->ssid));
+		memcpy(ap_data->bssid, ap_records[idx].bssid, sizeof(ap_data->bssid));
+	}
+
+err_out:
+	// Release scan result buffer
+	if(ap_records != NULL){
+		free(ap_records);
+	}
+
+	// If something went wrong, release possibly incomplete ApData
+	if(result != ESP_OK){
+		freeApData();
+	}
+
+	// Indicate that scan data can now be used
+	cgiWifiAps.scanInProgress=0;
 }
 #endif
 

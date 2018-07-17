@@ -716,6 +716,7 @@ void ICACHE_FLASH_ATTR httpdFreertosSslSetCertificateAndKey(HttpdFreertosInstanc
                                         const void *certificate, size_t certificate_size,
                                         const void *private_key, size_t private_key_size)
 {
+#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
     if(pInstance->httpdFlags & HTTPD_FLAG_SSL)
     {
         if(pInstance->ctx)
@@ -733,11 +734,13 @@ void ICACHE_FLASH_ATTR httpdFreertosSslSetCertificateAndKey(HttpdFreertosInstanc
     {
         ESP_LOGE(TAG, "Server not initialized for ssl");
     }
+#endif
 }
 
 void ICACHE_FLASH_ATTR httpdFreertosSslSetClientValidation(HttpdFreertosInstance *pInstance,
                                          SslClientVerifySetting verifySetting)
 {
+#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
     int flags;
 
     if(pInstance->httpdFlags & HTTPD_FLAG_SSL)
@@ -763,17 +766,20 @@ void ICACHE_FLASH_ATTR httpdFreertosSslSetClientValidation(HttpdFreertosInstance
     {
         ESP_LOGE(TAG, "Server not initialized for ssl");
     }
+#endif
 }
 
 void ICACHE_FLASH_ATTR httpdFreertosSslAddClientCertificate(HttpdFreertosInstance *pInstance,
                                           const void *certificate, size_t certificate_size)
 {
+#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
     X509 *client_cacert = d2i_X509(NULL, certificate, certificate_size);
     int rv = SSL_CTX_add_client_CA(pInstance->ctx, client_cacert);
     if(rv == 0)
     {
         ESP_LOGE(TAG, "SSL_CTX_add_client_CA failed");
     }
+#endif
 }
 
 HttpdStartStatus ICACHE_FLASH_ATTR httpdFreertosStart(HttpdFreertosInstance *pInstance)

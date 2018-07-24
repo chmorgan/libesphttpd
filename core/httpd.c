@@ -684,6 +684,17 @@ static CallbackStatus ICACHE_FLASH_ATTR httpdParseHeader(char *h, HttpdConnData 
         } else {
             conn->getArgs=NULL;
         }
+
+#ifdef CONFIG_ESPHTTPD_SANITIZE_URLS
+        // Remove multiple repeated slashes in URL path.
+        while((e = strstr(conn->url, "//")) != NULL){
+            // Move string starting at second slash one place to the left.
+            // Use strlen() on the first slash so the '\0' will be copied too.
+            ESP_LOGD(TAG, "Cleaning up URL path: %s", conn->url);
+            memmove(e, e + 1, strlen(e));
+            ESP_LOGD(TAG, "Cleaned URL path: %s", conn->url);
+        }
+#endif // CONFIG_ESPHTTPD_SANITIZE_URLS
     } else if (strncasecmp(h, "Connection:", 11)==0) {
         i=11;
         //Skip trailing spaces

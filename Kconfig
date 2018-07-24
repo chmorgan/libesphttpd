@@ -90,3 +90,11 @@ config ESPHTTPD_BACKLOG_SUPPORT
 		no need for the backlog.
 
 		If you are using FreeRTOS you'll save codespace by leaving this option disabled.
+
+config ESPHTTPD_SANITIZE_URLS
+	bool "Sanitize client requests"
+	depends on ESPHTTPD_ENABLED
+	default y
+	help
+		Sanitize client's URL requests by treating multiple repeated slashes in the
+		URL's path as a single slash.

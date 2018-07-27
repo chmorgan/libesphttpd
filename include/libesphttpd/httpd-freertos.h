@@ -21,6 +21,13 @@
 #include <netinet/in.h>
 #endif
 
+
+#ifdef linux
+    #define PLAT_RETURN void*
+#else
+    #define PLAT_RETURN void
+#endif
+
 struct RtosConnType{
 	int fd;
 	int needWriteDoneNotif;
@@ -66,6 +73,11 @@ typedef struct
 
     HttpdInstance httpdInstance;
 } HttpdFreertosInstance;
+
+/**
+ * Manually execute webserver task - do not use with httpdFreertosStart
+ */
+PLAT_RETURN platHttpServerTask(void *pvParameters);
 
 /*
  * connectionBuffer should be sized 'sizeof(RtosConnType) * maxConnections'

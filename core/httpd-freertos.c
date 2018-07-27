@@ -190,18 +190,16 @@ static bool sslSetDerCertificateAndKey(HttpdFreertosInstance *pInstance,
 
 #ifdef linux
 
-#define PLAT_RETURN void*
 #define PLAT_TASK_EXIT return NULL
 
 #else
 
-#define PLAT_RETURN void
 #define PLAT_TASK_EXIT vTaskDelete(NULL)
 
 #endif
 
 
-static PLAT_RETURN platHttpServerTask(void *pvParameters)
+PLAT_RETURN platHttpServerTask(void *pvParameters)
 {
     int32 listenfd;
     int32 remotefd;

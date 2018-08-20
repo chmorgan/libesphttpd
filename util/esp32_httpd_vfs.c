@@ -31,15 +31,19 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsHook(HttpdConnData *connData) {
 
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
-		fclose(file);
+		if(file != NULL){
+			fclose(file);
+		}
 		return HTTPD_CGI_DONE;
 	}
 
 	//First call to this cgi.
 	if (file==NULL) {
+		filename[0] = '\0';
+
 		if (connData->cgiArg != NULL) {
 			strncpy(filename, connData->cgiArg, MAX_FILENAME_LENGTH);
-		} 
+		}
 		strncat(filename, connData->url, MAX_FILENAME_LENGTH - strlen(filename));
 		ESP_LOGI(__func__, "GET: %s", filename);
 		
@@ -118,7 +122,9 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsTemplate(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		((TplCallback)(connData->cgiArg))(connData, NULL, &tpd->tplArg);
-		fclose(tpd->file);
+		if(tpd->file != NULL){
+			fclose(tpd->file);
+		}
 		free(tpd);
 		return HTTPD_CGI_DONE;
 	}
@@ -201,53 +207,59 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsTemplate(HttpdConnData *connData) {
 }
 
 CgiStatus   cgiEspVfsUpload(HttpdConnData *connData) {
-    FILE *file=connData->cgiData;
-    char filename[MAX_FILENAME_LENGTH + 1];
-    char output[FILE_CHUNK_LEN];	//Temporary buffer for HTML output
-    int len;
+	FILE *file=connData->cgiData;
+	char filename[MAX_FILENAME_LENGTH + 1];
+	char output[FILE_CHUNK_LEN];	//Temporary buffer for HTML output
+	int len;
     
-    if (connData->isConnectionClosed) {
+	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
-		fclose(file);
+		if(file != NULL){
+			fclose(file);
+		}
 		return HTTPD_CGI_DONE;
 	}
 
-    //First call to this cgi.
+	//First call to this cgi.
 	if (file==NULL) {
-        
-        if (connData->requestType!=HTTPD_METHOD_PUT) {
-            httpdStartResponse(connData, 405);  //http error code 'Method Not Allowed'
-            httpdEndHeaders(connData);
-            return HTTPD_CGI_DONE;
-        } else {
-            strncpy(filename, connData->cgiArg, MAX_FILENAME_LENGTH);
-            strncat(filename, "/", MAX_FILENAME_LENGTH - strlen(filename));
-            strncat(filename, connData->getArgs, MAX_FILENAME_LENGTH - strlen(filename));
-            ESP_LOGI(__func__, "Uploading: %s", filename);
+		filename[0] = '\0';
 
-            file = fopen(filename, "w");
-            connData->cgiData = file;
-        }
-    }
+		if (connData->requestType!=HTTPD_METHOD_PUT) {
+			httpdStartResponse(connData, 405);  //http error code 'Method Not Allowed'
+			httpdEndHeaders(connData);
+			return HTTPD_CGI_DONE;
+		} else {
+			if(connData->cgiArg != NULL){
+				strncpy(filename, connData->cgiArg, MAX_FILENAME_LENGTH);
+			}
 
-    ESP_LOGI(__func__, "Chunk: %d bytes, ", connData->post.buffLen);
-    fwrite(connData->post.buff, 1, connData->post.buffLen, file);
-    //todo: error check that bytes written == bufLen etc...
-    if (connData->post.received == connData->post.len) {
+			strncat(filename, "/", MAX_FILENAME_LENGTH - strlen(filename));
+			strncat(filename, connData->getArgs, MAX_FILENAME_LENGTH - strlen(filename));
+			ESP_LOGI(__func__, "Uploading: %s", filename);
+
+			file = fopen(filename, "w");
+			connData->cgiData = file;
+		}
+	}
+
+	ESP_LOGI(__func__, "Chunk: %d bytes, ", connData->post.buffLen);
+	fwrite(connData->post.buff, 1, connData->post.buffLen, file);
+	//todo: error check that bytes written == bufLen etc...
+	if (connData->post.received == connData->post.len) {
 		//We're done.
 		fclose(file);
-        ESP_LOGI(__func__, "Total: %d bytes written, ", connData->post.received);
-        httpdStartResponse(connData, 200); 
-        httpdHeader(connData, "Content-Type", "application/json");
-        httpdEndHeaders(connData);
+		ESP_LOGI(__func__, "Total: %d bytes written, ", connData->post.received);
+		httpdStartResponse(connData, 200);
+		httpdHeader(connData, "Content-Type", "application/json");
+		httpdEndHeaders(connData);
 
-        httpdSend(connData, "{", -1);
-        len = snprintf(output, FILE_CHUNK_LEN, "\"filename\": \"%s/%s\", ", (char *) connData->cgiArg, (char *) connData->getArgs);
-        httpdSend(connData, output, len);
-        len = snprintf(output, FILE_CHUNK_LEN, "\"size\": \"%d\" ", connData->post.received);
-        httpdSend(connData, output, len);
-        httpdSend(connData, "}", -1);
-        return HTTPD_CGI_DONE;
+		httpdSend(connData, "{", -1);
+		len = snprintf(output, FILE_CHUNK_LEN, "\"filename\": \"%s/%s\", ", (char *) connData->cgiArg, (char *) connData->getArgs);
+		httpdSend(connData, output, len);
+		len = snprintf(output, FILE_CHUNK_LEN, "\"size\": \"%d\" ", connData->post.received);
+		httpdSend(connData, output, len);
+		httpdSend(connData, "}", -1);
+		return HTTPD_CGI_DONE;
 	} else {
 		//Ok, till next time.
 		return HTTPD_CGI_MORE;

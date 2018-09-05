@@ -14,7 +14,7 @@ Websocket support for esphttpd. Inspired by https://github.com/dangrie158/ESP-82
 
 #include "libesphttpd/httpd.h"
 #include "libesphttpd/sha1.h"
-#include "base64.h"
+#include "libesphttpd_base64.h"
 #include "libesphttpd/cgiwebsocket.h"
 
 #include "esp_log.h"
@@ -335,7 +335,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData) {
 				httpdStartResponse(connData, 101);
 				httpdHeader(connData, "Upgrade", "websocket");
 				httpdHeader(connData, "Connection", "upgrade");
-				base64_encode(20, sha1_result(&s), sizeof(buff), buff);
+				libesphttpd_base64_encode(20, sha1_result(&s), sizeof(buff), buff);
 				httpdHeader(connData, "Sec-WebSocket-Accept", buff);
 				httpdEndHeaders(connData);
 				//Set data receive handler

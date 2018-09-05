@@ -13,7 +13,7 @@ HTTP auth implementation. Only does basic authentication for now.
 #endif
 
 #include "libesphttpd/auth.h"
-#include "base64.h"
+#include "libesphttpd_base64.h"
 
 CgiStatus ICACHE_FLASH_ATTR authBasic(HttpdConnData *connData) {
 	const char *unauthorized = "401 Unauthorized.";
@@ -32,7 +32,7 @@ CgiStatus ICACHE_FLASH_ATTR authBasic(HttpdConnData *connData) {
 
 	r=httpdGetHeader(connData, "Authorization", hdr, sizeof(hdr));
 	if (r && strncmp(hdr, "Basic", 5)==0) {
-		r=base64_decode(strlen(hdr)-6, hdr+6, sizeof(userpass), (unsigned char *)userpass);
+		r=libesphttpd_base64_decode(strlen(hdr)-6, hdr+6, sizeof(userpass), (unsigned char *)userpass);
 		if (r<0) r=0; //just clean out string on decode error
 		userpass[r]=0; //zero-terminate user:pass string
 //		printf("Auth: %s\n", userpass);

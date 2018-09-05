@@ -10,7 +10,7 @@
 #include <libesphttpd/esp.h>
 #endif
 
-#include "base64.h"
+#include "libesphttpd_base64.h"
 
 static const int base64dec_tab[256] ICACHE_RODATA_ATTR={
 	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
@@ -48,7 +48,7 @@ static int ICACHE_FLASH_ATTR base64decode(const char in[4], char out[3]) {
 #endif
 
 /* decode a base64 string in one shot */
-int ICACHE_FLASH_ATTR  __attribute__((weak)) base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
+int ICACHE_FLASH_ATTR  __attribute__((weak)) libesphttpd_base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
 	unsigned int ii, io;
 	uint32_t v;
 	unsigned int rem;
@@ -86,7 +86,7 @@ void base64encode(const unsigned char in[3], unsigned char out[4], int count) {
 }
 #endif
 
-int ICACHE_FLASH_ATTR __attribute__((weak)) base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
+int ICACHE_FLASH_ATTR __attribute__((weak)) libesphttpd_base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
 	unsigned ii, io;
 	uint32_t v;
 	unsigned rem;

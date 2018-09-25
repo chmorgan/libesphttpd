@@ -730,8 +730,9 @@ static CallbackStatus ICACHE_FLASH_ATTR httpdParseHeader(char *h, HttpdConnData 
             // It's multipart form data so let's pull out the boundary
             // TODO: implement multipart support in the server
             char *b;
-            if ((b = strstr(h, "boundary=")) != NULL) {
-                conn->post.multipartBoundary = b + 7;
+            const char* boundaryToken = "boundary=";
+            if ((b = strstr(h, boundaryToken)) != NULL) {
+                conn->post.multipartBoundary = b + strlen(boundaryToken);
                 ESP_LOGD(TAG, "boundary = %s", conn->post.multipartBoundary);
             }
         }

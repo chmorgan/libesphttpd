@@ -101,18 +101,7 @@ of a DNS-server (started by calling `captdnsInit()`) resolving all hostnames int
 ESP8266/ESP32. These redirect functions can then be used to further redirect the client to the hostname of 
 the ESP8266/ESP32.
 
-* __cgiReadFlash__ (arg: none)
-Will serve up the SPI flash of the ESP8266/ESP32 as a binary file.
-
-* __cgiGetFirmwareNext__ (arg: CgiUploadFlashDef flash description data)
-For OTA firmware upgrade: indicates if the user1 or user2 firmware needs to be sent to the ESP to do
-an OTA upgrade
-
-* __cgiUploadFirmware__ (arg: CgiUploadFlashDef flash description data)
-Accepts a POST request containing the user1 or user2 firmware binary and flashes it to the SPI flash
-
-* __cgiRebootFirmware__ (arg: none)
-Reboots the ESP8266/ESP32 to the newly uploaded code after a firmware upload.
+* Flash updating functions (OTA) - see [README-flash_api](./README-flash_api.md)
 
 * __cgiWiFi* functions__ (arg: various)
 These are used to change WiFi mode, scan for access points, associate to an access point etcetera. See

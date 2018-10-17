@@ -61,6 +61,13 @@ config ESPHTTPD_USEUGLIFYJS
 	default n
 	help
 		Compress JS files with the uglifyjs compressor. Needs uglifyjs installed.
+        
+config ESPHTTPD_USEYUICOMPRESSOR
+	bool "Compress JS and css with yui-compressor"
+        depends on ESPHTTPD_ENABLED
+	default n
+	help
+		Compress JS and css files with the yui-compressor. Needs yui-compressor installed.
 
 config ESPHTTPD_SO_REUSEADDR
 	bool "Set SO_REUSEADDR to avoid waiting for a port in TIME_WAIT."

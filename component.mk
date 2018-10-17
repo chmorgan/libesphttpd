@@ -19,6 +19,8 @@ HTMLDIR := $(subst ",,$(CONFIG_ESPHTTPD_HTMLDIR))
 HTMLFILES := $(shell find $(PROJECT_PATH)/$(HTMLDIR) | sed -E 's/([[:space:]])/\\\1/g')
 
 JS_MINIFY_TOOL ?= uglifyjs
+YUI-COMPRESSOR ?= $(PROJECT_PATH)/../Tools/java.exe -jar $(PROJECT_PATH)/../Tools/yuicompressor-2.4.8.jar
+
 CFLAGS += -DFREERTOS -DESPFS_HEATSHRINK
 
 USE_HEATSHRINK := "yes"
@@ -40,8 +42,18 @@ ifeq ("$(CONFIG_ESPHTTPD_USEUGLIFYJS)","y")
 	for file in `find html_compressed -type f -name "*.js"`; do $(JS_MINIFY_TOOL) $$file -c -m -o $$file; done
 	awk "BEGIN {printf \" compression ratio was: %.2f%%\\n\", (`du -b -s html_compressed/ | sed 's/\([0-9]*\).*/\1/'`/`du -b -s $(PROJECT_PATH)/$(HTMLDIR) | sed 's/\([0-9]*\).*/\1/'`)*100}"
 	cd html_compressed; find . | $(COMPONENT_BUILD_DIR)/mkespfsimage/mkespfsimage > $(COMPONENT_BUILD_DIR)/webpages.espfs; cd ..;
+else ifeq ("$(CONFIG_ESPHTTPD_USEYUICOMPRESSOR)","y")
+	echo "Using yui-compressor"
+	rm -rf html_compressed;
+	cp -r $(PROJECT_PATH)/$(HTMLDIR) html_compressed;
+	echo "Compressing assets with yui-compressor."
+	for file in `find html_compressed -type f -name "*.js"`; do $(YUI-COMPRESSOR) --type js $$file -o $$file; done
+	for file in `find html_compressed -type f -name "*.css"`; do $(YUI-COMPRESSOR) --type css $$file -o $$file; done
+	echo "yui-compressor done.";
+	awk "BEGIN {printf \" compression ratio was: %.2f%%\\n\", (`du -b -s html_compressed/ | sed 's/\([0-9]*\).*/\1/'`/`du -b -s $(PROJECT_PATH)/$(HTMLDIR) | sed 's/\([0-9]*\).*/\1/'`)*100}"
+	cd html_compressed; find . | $(COMPONENT_BUILD_DIR)/mkespfsimage/mkespfsimage > $(COMPONENT_BUILD_DIR)/webpages.espfs; cd ..;
 else
-	echo "Not using uglifyjs"
+	echo "Not using uglifyjs or yui-compressor"
 	cd  $(PROJECT_PATH)/$(HTMLDIR) &&  find . | $(COMPONENT_BUILD_DIR)/mkespfsimage/mkespfsimage > $(COMPONENT_BUILD_DIR)/webpages.espfs
 endif
 

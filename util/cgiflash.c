@@ -9,17 +9,15 @@ Some flash handling cgi routines. Used for updating the ESPFS/OTA image.
 #include <libesphttpd/esp.h>
 #include "libesphttpd/cgiflash.h"
 #include "libesphttpd/espfs.h"
-#include "libesphttpd/cgiflash.h"
-#include "libesphttpd/espfs.h"
+#include "cJSON.h"
 
-//#include <osapi.h>
-#include "libesphttpd/cgiflash.h"
-#include "libesphttpd/espfs.h"
 #include "httpd-platform.h"
 #ifdef ESP32
 #include "esp32_flash.h"
 #include "esp_ota_ops.h"
 #include "esp_log.h"
+#include "esp_flash_data_types.h"
+#include "esp_image_format.h"
 
 static const char *TAG = "ota";
 #endif
@@ -129,6 +127,25 @@ typedef struct __attribute__((packed)) {
 } OtaHeader;
 #endif
 
+static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
+	char *json_string = NULL;
+
+	//// Generate the header
+	//We want the header to start with HTTP code 200, which means the document is found.
+	httpdStartResponse(connData, 200);
+	httpdHeader(connData, "Cache-Control", "no-store, must-revalidate, no-cache, max-age=0");
+	httpdHeader(connData, "Expires", "Mon, 01 Jan 1990 00:00:00 GMT");  //  This one might be redundant, since modern browsers look for "Cache-Control".
+	httpdHeader(connData, "Content-Type", "application/json; charset=utf-8"); //We are going to send some JSON.
+	httpdEndHeaders(connData);
+	json_string = cJSON_Print(jsroot);
+    if (json_string)
+    {
+    	httpdSend(connData, json_string, -1);
+        cJSON_free(json_string);
+    }
+    cJSON_Delete(jsroot);
+}
+
 #ifdef ESP32
 CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 	CgiUploadFlashDef *def=(CgiUploadFlashDef*)connData->cgiArg;
@@ -172,6 +189,26 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			state->state=FLST_START;
 			state->err="Premature end";
 		}
+		state->update_partition = NULL;
+		// check arg partition name
+		char arg_partition_buf[16] = "";
+		int len;
+//// HTTP GET queryParameter "partition" : string
+	    len=httpdFindArg(connData->getArgs, "partition", arg_partition_buf, sizeof(arg_partition_buf));
+	    if (len > 0)
+	    {
+	    	state->update_partition = esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_ANY,arg_partition_buf);
+	    }
+	    else
+	    {
+	    	state->update_partition = esp_ota_get_next_update_partition(NULL);
+	    }
+	    if (state->update_partition == NULL)
+	    {
+			ESP_LOGE(TAG, "update_partition not found!");
+			state->err="update_partition not found!";
+			state->state=FLST_ERROR;
+	    }
 
 		connData->cgiData=state;
 	}
@@ -187,19 +224,30 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 				state->state=FLST_ERROR;
 				ESP_LOGE(TAG, "Combined flash image not supported on ESP32!");
 			} else if (def->type==CGIFLASH_TYPE_FW && checkBinHeader(connData->post.buff)) {
-				state->update_partition = esp_ota_get_next_update_partition(NULL);
-				ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x",
-					state->update_partition->subtype, state->update_partition->address);
-				assert(state->update_partition != NULL);
+			    if (state->update_partition == NULL)
+			    {
+					ESP_LOGE(TAG, "update_partition not found!");
+					state->err="update_partition not found!";
+					state->state=FLST_ERROR;
+			    }
+			    else
+			    {
+			    	ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x", state->update_partition->subtype, state->update_partition->address);
 
-				err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
-				if (err != ESP_OK) {
-					ESP_LOGE(TAG, "esp_ota_begin failed, error=%d", err);
-				}
-				ESP_LOGI(TAG, "esp_ota_begin succeeded");
-
-				state->state = FLST_WRITE;
-				state->len = connData->post.len;
+					err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
+					if (err != ESP_OK)
+					{
+						ESP_LOGE(TAG, "esp_ota_begin failed, error=%d", err);
+						state->err="esp_ota_begin failed!";
+						state->state=FLST_ERROR;
+					}
+					else
+					{
+						ESP_LOGI(TAG, "esp_ota_begin succeeded");
+						state->state = FLST_WRITE;
+						state->len = connData->post.len;
+					}
+			    }
 			} else if (def->type==CGIFLASH_TYPE_ESPFS && checkEspfsHeader(connData->post.buff)) {
 				if (connData->post.len > def->fwSize) {
 					state->err="Firmware image too large";
@@ -218,6 +266,8 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			err = esp_ota_write(state->update_handle, data, dataLen);
 			if (err != ESP_OK) {
 				ESP_LOGE(TAG, "Error: esp_ota_write failed! err=0x%x", err);
+				state->err="Error: esp_ota_write failed!";
+				state->state=FLST_ERROR;
 			}
 
 			state->len-=dataLen;
@@ -244,26 +294,30 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 	printf("state->len %d, state->address: %d\n", state->len, state->address);
 #endif
 
-	if (connData->post.len == connData->post.received) {
-		//We're done! Format a response.
-		ESP_LOGD(TAG, "Upload done. Sending response");
-		httpdStartResponse(connData, state->state==FLST_ERROR?400:200);
-		httpdHeader(connData, "Content-Type", "text/plain");
-		httpdEndHeaders(connData);
-		if (state->state!=FLST_DONE) {
-			httpdSend(connData, "Firmware image error:", -1);
-			httpdSend(connData, state->err, -1);
-			httpdSend(connData, "\n", -1);
-		} else {
+	if  (connData->post.len == connData->post.received) {
+		cJSON *jsroot = cJSON_CreateObject();
+		if (state->state==FLST_DONE) {
 			if (esp_ota_end(state->update_handle) != ESP_OK) {
+				state->err="esp_ota_end failed!";
 		        ESP_LOGE(TAG, "esp_ota_end failed!");
+		        state->state=FLST_ERROR;
 		    }
-		    err = esp_ota_set_boot_partition(state->update_partition);
-		    if (err != ESP_OK) {
-		        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed! err=0x%x", err);
-		    }
+			else
+			{
+				state->err="Flash Success.";
+				ESP_LOGI(TAG, "Upload done. Sending response");
+			}
+			// todo: automatically set boot flag?
+			err = esp_ota_set_boot_partition(state->update_partition);
+			if (err != ESP_OK) {
+				ESP_LOGE(TAG, "esp_ota_set_boot_partition failed! err=0x%x", err);
+			}
 		}
+		cJSON_AddStringToObject(jsroot, "message", state->err);
+		cJSON_AddBoolToObject(jsroot, "success", (state->state==FLST_DONE)?true:false);
 		free(state);
+
+		cgiJsonResponseCommon(connData, jsroot); // Send the json response!
 		return HTTPD_CGI_DONE;
 	}
 
@@ -457,17 +511,212 @@ CgiStatus ICACHE_FLASH_ATTR cgiRebootFirmware(HttpdConnData *connData) {
 		//Connection aborted. Clean up.
 		return HTTPD_CGI_DONE;
 	}
+	cJSON *jsroot = cJSON_CreateObject();
 
+	ESP_LOGD(TAG, "Reboot Command recvd. Sending response");
 	// TODO: sanity-check that the 'next' partition actually contains something that looks like
 	// valid firmware
 
 	//Do reboot in a timer callback so we still have time to send the response.
-	resetTimer=httpdPlatTimerCreate("flashreset", 200, 0, resetTimerCb, NULL);
+	resetTimer=httpdPlatTimerCreate("flashreset", 500, 0, resetTimerCb, NULL);
 	httpdPlatTimerStart(resetTimer);
 
-	httpdStartResponse(connData, 200);
-	httpdHeader(connData, "Content-Type", "text/plain");
-	httpdEndHeaders(connData);
-	httpdSend(connData, "Rebooting...", -1);
+	cJSON_AddStringToObject(jsroot, "message", "Rebooting...");
+	cJSON_AddBoolToObject(jsroot, "success", true);
+	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	return HTTPD_CGI_DONE;
+}
+
+// Handle request to set boot flag
+CgiStatus ICACHE_FLASH_ATTR cgiSetBoot(HttpdConnData *connData) {
+	if (connData->isConnectionClosed) {
+		//Connection aborted. Clean up.
+		return HTTPD_CGI_DONE;
+	}
+	const esp_partition_t *wanted_bootpart = NULL;
+	const esp_partition_t *actual_bootpart = NULL;
+	cJSON *jsroot = cJSON_CreateObject();
+
+	// check arg partition name
+	char arg_partition_buf[16] = "";
+	int len;
+//// HTTP GET queryParameter "partition" : string
+    len=httpdFindArg(connData->getArgs, "partition", arg_partition_buf, sizeof(arg_partition_buf));
+    if (len > 0)
+    {
+    	ESP_LOGD(TAG, "Set Boot Command recvd. for partition with name: %s", arg_partition_buf);
+    	wanted_bootpart = esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_ANY,arg_partition_buf);
+    	esp_err_t err = esp_ota_set_boot_partition(wanted_bootpart);
+    	if (err != ESP_OK) {
+    		ESP_LOGE(TAG, "esp_ota_set_boot_partition failed! err=0x%x", err);
+    	}
+    }
+    actual_bootpart = esp_ota_get_boot_partition(); // if above failed or arg not specified, return what is currently set for boot.
+
+	cJSON_AddStringToObject(jsroot, "boot", actual_bootpart->label);
+	cJSON_AddBoolToObject(jsroot, "success", (wanted_bootpart == NULL || wanted_bootpart == actual_bootpart));
+
+	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	return HTTPD_CGI_DONE;
+}
+
+// Handle request to format a data partition
+CgiStatus ICACHE_FLASH_ATTR cgiEraseFlash(HttpdConnData *connData) {
+	if (connData->isConnectionClosed) {
+		//Connection aborted. Clean up.
+		return HTTPD_CGI_DONE;
+	}
+	const esp_partition_t *wanted_partition = NULL;
+	cJSON *jsroot = cJSON_CreateObject();
+	esp_err_t err = ESP_FAIL;
+
+	// check arg partition name
+	char arg_partition_buf[16] = "";
+	int len;
+//// HTTP GET queryParameter "partition" : string
+    len=httpdFindArg(connData->getArgs, "partition", arg_partition_buf, sizeof(arg_partition_buf));
+    if (len > 0)
+    {
+    	ESP_LOGD(TAG, "Erase command recvd. for partition with name: %s", arg_partition_buf);
+    	wanted_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_ANY,arg_partition_buf);
+    	err = esp_partition_erase_range(wanted_partition, 0, wanted_partition->size);
+    	if (err != ESP_OK) {
+    		ESP_LOGE(TAG, "erase partition failed! err=0x%x", err);
+    	}
+    	else
+    	{
+    		ESP_LOGW(TAG, "Data partition: %s is erased now!  Must reboot to reformat it!", wanted_partition->label);
+    		cJSON_AddStringToObject(jsroot, "erased", wanted_partition->label);
+    	}
+    }
+
+	cJSON_AddBoolToObject(jsroot, "success", (err == ESP_OK));
+
+	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	return HTTPD_CGI_DONE;
+}
+
+/* @brief Check if selected partition has a valid APP
+ *  Warning- this takes a long time to execute and dumps a bunch of stuff to the console!
+ *  todo: find a faster method to veryify an APP
+ */
+static int check_partition_valid_app(const esp_partition_t *partition)
+{
+    if (partition == NULL) {
+        return 0;
+    }
+
+    esp_image_metadata_t data;
+    const esp_partition_pos_t part_pos = {
+        .offset = partition->address,
+        .size = partition->size,
+    };
+    if (esp_image_load(ESP_IMAGE_VERIFY_SILENT, &part_pos, &data) != ESP_OK) {
+        return 0;  // partition does not hold a valid app
+    }
+    return 1; // App in partition is valid
+}
+
+#define PARTITION_IS_FACTORY(partition)  ((partition->type == ESP_PARTITION_TYPE_APP) && (partition->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY))
+#define PARTITION_IS_OTA(partition)  ((partition->type == ESP_PARTITION_TYPE_APP) && (partition->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_MIN) && (partition->subtype <= ESP_PARTITION_SUBTYPE_APP_OTA_MAX))
+// Cgi to query info about partitions and firmware
+CgiStatus ICACHE_FLASH_ATTR cgiGetFlashInfo(HttpdConnData *connData) {
+	if (connData->isConnectionClosed) {
+		//Connection aborted. Clean up.
+		return HTTPD_CGI_DONE;
+	}
+	const esp_partition_t *running_partition = NULL;
+	const esp_partition_t *boot_partition = NULL;
+
+	cJSON *jsroot = cJSON_CreateObject();
+	// check arg
+	char arg_1_buf[16] = "";
+	int len;
+//// HTTP GET queryParameter "ptype" : string ("app", "data")
+	bool get_app = true;  // get both app and data partitions by default
+	bool get_data = true;
+    len=httpdFindArg(connData->getArgs, "ptype", arg_1_buf, sizeof(arg_1_buf));
+    if (len > 0)
+    {
+    	if (strcmp(arg_1_buf, "app") == 0)
+    	{
+    		get_data = false;  // don't get data partitinos if client specified ?type=app
+    	}
+    	else if (strcmp(arg_1_buf, "data") == 0)
+    	{
+    		get_app = false;  // don't get app partitinos if client specified ?type=data
+    	}
+    }
+//// HTTP GET queryParameter "verify"	: number 0,1
+	bool verify_app = false;  // default don't verfiy apps, because it takes a long time.
+    len=httpdFindArg(connData->getArgs, "verify", arg_1_buf, sizeof(arg_1_buf));
+    if (len > 0) {
+    	char ch;  // dummy to test for malformed input
+    	int val;
+    	int n = sscanf(arg_1_buf, "%d%c", &val, &ch);
+		if (n == 1) {
+			/* sscanf found a number to convert */
+			verify_app = (val == 1)?(true):(false);
+		}
+    }
+//// HTTP GET queryParameter "partition" : string
+	bool specify_partname = false;
+	len=httpdFindArg(connData->getArgs, "partition", arg_1_buf, sizeof(arg_1_buf));
+	if (len > 0)
+	{
+		specify_partname = true;
+	}
+
+    if (get_app)
+    {
+    	running_partition = esp_ota_get_running_partition();
+    	boot_partition = esp_ota_get_boot_partition();
+    	if (boot_partition == NULL) {boot_partition = running_partition;} // If no ota_data partition, then esp_ota_get_boot_partition() might return NULL.
+    	cJSON *jsapps = cJSON_AddArrayToObject(jsroot, "app");
+    	esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, (specify_partname)?(arg_1_buf):(NULL));
+        while (it != NULL) {
+            const esp_partition_t *it_partition = esp_partition_get(it);
+    		if (it_partition != NULL)
+    		{
+    			cJSON *partj = NULL;
+    			partj = cJSON_CreateObject();
+    			cJSON_AddStringToObject(partj, "name", it_partition->label);
+    			cJSON_AddNumberToObject(partj, "size", it_partition->size);
+    			cJSON_AddStringToObject(partj, "version", "");  // todo
+    			cJSON_AddBoolToObject(partj, "ota", PARTITION_IS_OTA(it_partition));
+    			if (verify_app)
+    			{
+    				cJSON_AddBoolToObject(partj, "valid", check_partition_valid_app(it_partition));
+    			}
+    			cJSON_AddBoolToObject(partj, "running", (it_partition==running_partition));
+    			cJSON_AddBoolToObject(partj, "bootset", (it_partition==boot_partition));
+    			cJSON_AddItemToArray(jsapps, partj);
+    			it = esp_partition_next(it);
+    		}
+        }
+    	esp_partition_iterator_release(it);
+    }
+
+	if (get_data)
+	{
+		cJSON *jsdatas = cJSON_AddArrayToObject(jsroot, "data");
+		esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, (specify_partname)?(arg_1_buf):(NULL));
+	    while (it != NULL) {
+	        const esp_partition_t *it_partition = esp_partition_get(it);
+			if (it_partition != NULL)
+			{
+				cJSON *partj = NULL;
+				partj = cJSON_CreateObject();
+				cJSON_AddStringToObject(partj, "name", it_partition->label);
+				cJSON_AddNumberToObject(partj, "size", it_partition->size);
+				cJSON_AddNumberToObject(partj, "format", it_partition->subtype);
+				cJSON_AddItemToArray(jsdatas, partj);
+				it = esp_partition_next(it);
+			}
+	    }
+		esp_partition_iterator_release(it);
+	}
+	cJSON_AddBoolToObject(jsroot, "success", true);
+	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
 	return HTTPD_CGI_DONE;
 }

@@ -79,6 +79,13 @@ config ESPHTTPD_SO_REUSEADDR
 		Sets the SO_REUSEADDR flag on a socket prior to attempting to bind(). Avoids the condition where
 		the bind() calls will fail while the port is in TIME_WAIT for a number of minutes.
 
+config ESPHTTPD_TCP_NODELAY
+	bool "Set TCP_NODELAY."
+	depends on ESPHTTPD_ENABLED
+	default y
+	help
+		Set TCP_NODELAY to avoid waiting for a ACK to send multiple small frames (It will disable Nagle's TCP Algorithm).  It can speed-up transfers for small files.
+
 config ESPHTTPD_SSL_SUPPORT
 	bool "Enable SSL support"
         depends on ESPHTTPD_ENABLED

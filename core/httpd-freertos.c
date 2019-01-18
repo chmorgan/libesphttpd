@@ -383,11 +383,15 @@ PLAT_RETURN platHttpServerTask(void *pvParameters)
                 int keepIdle = 60; //60s
                 int keepInterval = 5; //5s
                 int keepCount = 3; //retry times
-
+                int nodelay = 0;
+#ifdef CONFIG_ESPHTTPD_TCP_NODELAY
+                nodelay = 1;  // enable TCP_NODELAY to speed-up transfers of small files.  See Nagle's Algorithm.
+#endif
                 setsockopt(remotefd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepAlive, sizeof(keepAlive));
                 setsockopt(remotefd, IPPROTO_TCP, TCP_KEEPIDLE, (void*)&keepIdle, sizeof(keepIdle));
                 setsockopt(remotefd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepInterval, sizeof(keepInterval));
                 setsockopt(remotefd, IPPROTO_TCP, TCP_KEEPCNT, (void *)&keepCount, sizeof(keepCount));
+                setsockopt(remotefd, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof(nodelay));
 
                 pRconn->fd=remotefd;
                 pRconn->needWriteDoneNotif=0;

@@ -56,12 +56,20 @@ config ESPHTTPD_HTMLDIR
 	default "html/"
 
 config ESPHTTPD_USEUGLIFYJS
-	bool "Compress JS with uglifyjs"
+	bool "Compress JS, CSS, HTML with node.js tools"
         depends on ESPHTTPD_ENABLED
 	default n
 	help
-		Compress JS files with the uglifyjs compressor. Needs uglifyjs installed.
-        
+		Compress assets using babel, html-minifier, uglifycss and uglifyjs.
+		Requires node.js and tools installed.
+
+config ESPHTTPD_USENPM
+	bool "Download compression tools"
+	depends on ESPHTTPD_USEUGLIFYJS
+	default y
+	help
+		Download babel, html-minifier, uglifycss and uglifyjs.
+
 config ESPHTTPD_USEYUICOMPRESSOR
 	bool "Compress JS and css with yui-compressor"
         depends on ESPHTTPD_ENABLED

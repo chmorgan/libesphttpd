@@ -124,6 +124,11 @@ int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, co
 	// add FIN to last frame
 	if (!(flags&WEBSOCK_FLAG_MORE)) fl|=FLAG_FIN;
 
+    if (ws->conn->isConnectionClosed) {
+        ESP_LOGE(TAG, "Websocket closed, cannot send");
+        return WEBSOCK_CLOSED;
+    }
+
 	sendFrameHead(ws, fl, len);
 	if (len!=0) r=httpdSend(ws->conn, data, len);
 	httpdFlushSendBuffer(pInstance, ws->conn);

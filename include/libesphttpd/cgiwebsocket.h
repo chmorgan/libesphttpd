@@ -7,7 +7,7 @@
 #define WEBSOCK_FLAG_MORE (1<<0) //Set if the data is not the final data in the message; more follows
 #define WEBSOCK_FLAG_BIN (1<<1) //Set if the data is binary instead of text
 #define WEBSOCK_FLAG_CONT (1<<2) //set if this is a continuation frame (after WEBSOCK_FLAG_CONT)
-
+#define WEBSOCK_CLOSED -1
 
 typedef struct Websock Websock;
 typedef struct WebsockPriv WebsockPriv;

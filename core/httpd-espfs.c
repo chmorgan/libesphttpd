@@ -9,13 +9,14 @@ Connector to let httpd use the espfs filesystem to serve the files in it.
 #ifdef linux
 #include <libesphttpd/linux.h>
 #else
-#include <libesphttpd/esp.h>
+#include <libesphttpd/esp.h>  // for sdkconfig.h
 #endif
 
-#include "libesphttpd/httpdespfs.h"
-#include "libesphttpd/espfs.h"
-#include "espfsformat.h"
+#include <libesphttpd/httpd-espfs.h>
 
+#ifdef CONFIG_ESPHTTPD_USE_ESPFS
+#include "espfs.h"
+#include "espfsformat.h"  // just for FLAG_GZIP
 #include "esp_log.h"
 const static char* TAG = "httpdespfs";
 
@@ -413,3 +414,4 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData) {
 		return HTTPD_CGI_MORE;
 	}
 }
+#endif // CONFIG_ESPHTTPD_USE_ESPFS

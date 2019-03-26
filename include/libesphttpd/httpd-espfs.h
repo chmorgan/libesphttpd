@@ -1,8 +1,14 @@
 #ifndef HTTPDESPFS_H
 #define HTTPDESPFS_H
 
-#include "httpd.h"
+#ifdef linux
+#include <libesphttpd/linux.h>
+#else
+#include <libesphttpd/esp.h>  // for sdkconfig.h
+#endif
 
+#ifdef CONFIG_ESPHTTPD_USE_ESPFS
+#include "httpd.h"
 /**
  * The template substitution callback.
  * Returns CGI_MORE if more should be sent within the token, CGI_DONE otherwise.
@@ -17,4 +23,6 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData);
  */
 int tplSend(HttpdConnData *conn, const char *str, int len);
 
-#endif
+#endif // CONFIG_ESPHTTPD_USE_ESPFS
+
+#endif // HTTPDESPFS_H

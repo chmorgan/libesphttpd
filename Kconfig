@@ -1,4 +1,5 @@
 #ESP-IDF Kconfig configuration file. Not used for ESP8266 RTOS/non-RTOS SDKs.
+menu "esphttpd"
 
 menuconfig ESPHTTPD_ENABLED
     bool "esphttpd"
@@ -50,32 +51,12 @@ config ESPHTTPD_CORS_SUPPORT
         Enable support for CORS, cross origin resource sharing.
         NOTE: Requires 256 bytes of RAM for each connection
 
-config ESPHTTPD_HTMLDIR
-	string "Directory (on the build machine) where the static files served by the webserver are"
+config ESPHTTPD_USE_ESPFS
+	bool "Enable espfs filesystem"
         depends on ESPHTTPD_ENABLED
-	default "html/"
-
-config ESPHTTPD_USEUGLIFYJS
-	bool "Compress JS, CSS, HTML with node.js tools"
-        depends on ESPHTTPD_ENABLED
-	default n
-	help
-		Compress assets using babel, html-minifier, uglifycss and uglifyjs.
-		Requires node.js and tools installed.
-
-config ESPHTTPD_USENPM
-	bool "Download compression tools"
-	depends on ESPHTTPD_USEUGLIFYJS
 	default y
 	help
-		Download babel, html-minifier, uglifycss and uglifyjs.
-
-config ESPHTTPD_USEYUICOMPRESSOR
-	bool "Compress JS and css with yui-compressor"
-        depends on ESPHTTPD_ENABLED
-	default n
-	help
-		Compress JS and css files with the yui-compressor. Needs yui-compressor installed.
+		Enables integration with espfs (readonly) filesystem.  You need to include espfs submodule in your project if enabled.
 
 config ESPHTTPD_SO_REUSEADDR
 	bool "Set SO_REUSEADDR to avoid waiting for a port in TIME_WAIT."
@@ -120,3 +101,5 @@ config ESPHTTPD_SANITIZE_URLS
 	help
 		Sanitize client's URL requests by treating multiple repeated slashes in the
 		URL's path as a single slash.
+
+endmenu

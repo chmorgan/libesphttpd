@@ -23,6 +23,12 @@ Connector to let httpd use the vfs filesystem to serve the files in it.
 // If the client does not advertise that he accepts GZIP send following warning message (telnet users for e.g.)
 static const char *gzipNonSupportedMessage = "HTTP/1.0 501 Not implemented\r\nServer: esp8266-httpd/"HTTPDVER"\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 52\r\n\r\nYour browser does not accept gzip-compressed data.\r\n";
 
+static const char *get_filename_extension(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if (!dot || dot == filename) return "";
+    return dot + 1;
+}
+
 static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
 	char *json_string = NULL;
 
@@ -86,9 +92,25 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 		if (file != NULL) ESP_LOGD(__func__, "fopen: %s, r", filename);
 		isGzip = 0;
 		
-		if (file==NULL) {
+		const char *ext = get_filename_extension(filename);
+		if (file != NULL) {
+			if (strcmp(ext, "html") == 0 || strcmp(ext, "css") == 0
+					|| strcmp(ext, "js") == 0 || strcmp(ext, "svg") == 0) {
+				char head[2];
+				if (fread(head, 1, sizeof(head), file) == sizeof(head)) {
+					if (head[0] == 31 && head[1] == 139) {
+						isGzip = 1;
+					}
+				}
+				fseek(file, 0, SEEK_SET);
+			}
+		} else {
 			// Check if requested file is available GZIP compressed ie. with file extension .gz
-		
+
+			if (strcmp(ext, "gz") == 0) {
+				return HTTPD_CGI_NOTFOUND;
+			}
+
 			strncat(filename, ".gz", MAX_FILENAME_LENGTH - strlen(filename));
 			ESP_LOGD(__func__, "GET: GZIPped file - %s", filename);
 			file = fopen(filename, "r");

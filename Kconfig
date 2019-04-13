@@ -102,4 +102,11 @@ config ESPHTTPD_SANITIZE_URLS
 		Sanitize client's URL requests by treating multiple repeated slashes in the
 		URL's path as a single slash.
 
+config ESPHTTPD_SINGLE_REQUEST
+	bool "Single request per connection"
+	depends on ESPHTTPD_ENABLED
+	default n
+	help
+		Include the "Connection: close" header.  This is useful for captive portals.	
+
 endmenu

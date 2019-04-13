@@ -676,8 +676,11 @@ static CallbackStatus ICACHE_FLASH_ATTR httpdParseHeader(char *h, HttpdConnData 
         e++; //Skip to protocol indicator
         while (*e==' ') e++; //Skip spaces.
         //If HTTP/1.1, note that and set chunked encoding
+#if CONFIG_ESPHTTPD_SINGLE_REQUEST
+        if (strcasecmp(e, "HTTP/1.1")==0) conn->priv.flags|=HFL_HTTP11;
+#else
         if (strcasecmp(e, "HTTP/1.1")==0) conn->priv.flags|=HFL_HTTP11|HFL_CHUNKED;
-
+#endif // CONFIG_ESPHTTPD_SINGLE_REQUEST
         ESP_LOGD(TAG, "URL = %s", conn->url);
         //Parse out the URL part before the GET parameters.
         conn->getArgs=(char*)strstr(conn->url, "?");

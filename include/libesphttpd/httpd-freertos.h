@@ -74,10 +74,36 @@ typedef struct
     HttpdInstance httpdInstance;
 } HttpdFreertosInstance;
 
+typedef struct {
+    bool shutdown;
+    bool listeningForNewConnections;
+    char serverStr[20];
+    HttpdFreertosInstance *pInstance;
+    int32 listenFd;
+    int32 udpListenFd;
+    int32 remoteFd;
+} ServerTaskContext;
+
 /**
- * Manually execute webserver task - do not use with httpdFreertosStart
+ * Execute the server task in a loop, internally calls init, process and deinit
  */
 PLAT_RETURN platHttpServerTask(void *pvParameters);
+
+/**
+ * Manually init all data required for processing the server task
+ */
+void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInstance);
+
+/**
+ * Manually execute the server task loop function once
+ */
+void platHttpServerTaskProcess(ServerTaskContext *ctx);
+
+/**
+ * Manually deinit all data required for processing the server task
+ */
+PLAT_RETURN platHttpServerTaskDeinit(ServerTaskContext *ctx);
+
 
 /*
  * connectionBuffer should be sized 'sizeof(RtosConnType) * maxConnections'

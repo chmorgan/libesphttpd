@@ -199,31 +199,37 @@ static bool sslSetDerCertificateAndKey(HttpdFreertosInstance *pInstance,
 #endif
 
 
+
+
 PLAT_RETURN platHttpServerTask(void *pvParameters)
 {
-    int32 listenfd;
-    int32 remotefd;
-    int32 len;
-    int32 ret;
-    int x;
-    int maxfdp = 0;
-    fd_set readset,writeset;
-    struct sockaddr name;
-    struct sockaddr_in server_addr;
-    struct sockaddr_in remote_addr;
+    ServerTaskContext context = {0};
+    platHttpServerTaskInit(&context, (HttpdFreertosInstance*)pvParameters);
+    
+    while(!context.shutdown)
+    {
+        platHttpServerTaskProcess(&context);
+    }
 
-    HttpdFreertosInstance *pInstance = (HttpdFreertosInstance*)pvParameters;
+    return platHttpServerTaskDeinit(&context);
+}
 
-    int maxConnections = pInstance->httpdInstance.maxConnections;
+
+/**
+ * Manually init all data required for processing the server task
+ */
+void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInstance) {
+    ctx->pInstance = pInstance;
 
 #ifdef linux
-    pthread_mutex_init(&pInstance->httpdMux, NULL);
+    pthread_mutex_init(&ctx->pInstance->httpdMux, NULL);
 #else
-    pInstance->httpdMux = xSemaphoreCreateRecursiveMutex();
+    ctx->pInstance->httpdMux = xSemaphoreCreateRecursiveMutex();
 #endif
 
-    for (x=0; x < maxConnections; x++) {
-        pInstance->rconn[x].fd=-1;
+    int idxConnection = 0;
+    for (idxConnection=0; idxConnection < ctx->pInstance->httpdInstance.maxConnections; idxConnection++) {
+        ctx->pInstance->rconn[idxConnection].fd=-1;
     }
 
 #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
@@ -239,310 +245,328 @@ PLAT_RETURN platHttpServerTask(void *pvParameters)
 
     // FIXME: use and increment of currentUdpShutdownPort is not thread-safe
     // and should use a mutex
-    pInstance->udpShutdownPort = currentUdpShutdownPort;
+    ctx->pInstance->udpShutdownPort = currentUdpShutdownPort;
     currentUdpShutdownPort++;
-    udp_addr.sin_port = htons(pInstance->udpShutdownPort);
+    udp_addr.sin_port = htons(ctx->pInstance->udpShutdownPort);
 
-    int udpListenfd = socket(AF_INET, SOCK_DGRAM, 0);
-    ESP_LOGI(TAG, "udpListenfd %d", udpListenfd);
-    ret = bind(udpListenfd, (struct sockaddr *)&udp_addr, sizeof(udp_addr));
-    if(ret != 0)
+    ctx->udpListenFd = socket(AF_INET, SOCK_DGRAM, 0);
+    ESP_LOGI(TAG, "ctx->udpListenFd %d", ctx->udpListenFd);
+    if(bind(ctx->udpListenFd, (struct sockaddr *)&udp_addr, sizeof(udp_addr)) != 0)
     {
         ESP_LOGE(TAG, "udp bind failure");
         PLAT_TASK_EXIT;
     }
-    ESP_LOGI(TAG, "shutdown bound to udp port %d", pInstance->udpShutdownPort);
+    ESP_LOGI(TAG, "shutdown bound to udp port %d", ctx->pInstance->udpShutdownPort);
 #endif
 
     /* Construct local address structure */
+    struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr)); /* Zero out structure */
     server_addr.sin_family = AF_INET;			/* Internet address family */
-    server_addr.sin_addr.s_addr = pInstance->httpListenAddress.sin_addr.s_addr;
+    server_addr.sin_addr.s_addr = ctx->pInstance->httpListenAddress.sin_addr.s_addr;
 #ifndef linux
     server_addr.sin_len = sizeof(server_addr);
 #endif
-    server_addr.sin_port = htons(pInstance->httpPort); /* Local port */
+    server_addr.sin_port = htons(ctx->pInstance->httpPort); /* Local port */
 
-    char serverStr[20];
-    inet_ntop(AF_INET, &(server_addr.sin_addr), serverStr, sizeof(serverStr));
+    inet_ntop(AF_INET, &(server_addr.sin_addr), ctx->serverStr, sizeof(ctx->serverStr));
 
     /* Create socket for incoming connections */
     do{
-        listenfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (listenfd == -1) {
+        ctx->listenFd = socket(AF_INET, SOCK_STREAM, 0);
+        if (ctx->listenFd == -1) {
             ESP_LOGE(TAG, "socket");
             vTaskDelay(1000/portTICK_PERIOD_MS);
         }
-    } while(listenfd == -1);
+    } while(ctx->listenFd == -1);
 
 #ifdef CONFIG_ESPHTTPD_SO_REUSEADDR
     // enable SO_REUSEADDR so servers restarted on the same ip addresses
     // do not require waiting for 2 minutes while the socket is in TIME_WAIT
     int enable = 1;
-    if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+    if (setsockopt(ctx->listenFd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
     {
         perror("setsockopt(SO_REUSEADDR) failed");
     }
 #endif
 
     /* Bind to the local port */
+    int32 retBind = 0;
     do{
-        ret = bind(listenfd, (struct sockaddr *)&server_addr, sizeof(server_addr));
-        if (ret != 0) {
-            ESP_LOGE(TAG, "bind to address %s:%d", serverStr, pInstance->httpPort);
+        retBind = bind(ctx->listenFd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+        if (retBind != 0) {
+            ESP_LOGE(TAG, "bind to address %s:%d", ctx->serverStr, ctx->pInstance->httpPort);
             perror("bind");
             vTaskDelay(1000/portTICK_PERIOD_MS);
         }
-    } while(ret != 0);
+    } while(retBind != 0);
 
+    int32 retListen = 0;
     do{
         /* Listen to the local connection */
-        ret = listen(listenfd, maxConnections);
-        if (ret != 0) {
-            ESP_LOGE(TAG, "listen on fd %d", listenfd);
+        retListen = listen(ctx->listenFd, ctx->pInstance->httpdInstance.maxConnections);
+        if (retListen != 0) {
+            ESP_LOGE(TAG, "listen on fd %d", ctx->listenFd);
             perror("listen");
             vTaskDelay(1000/portTICK_PERIOD_MS);
         }
-    } while(ret != 0);
+    } while(retListen != 0);
 
-    ESP_LOGI(TAG, "esphttpd: active and listening to connections on %s", serverStr);
-    bool shutdown = false;
-    bool listeningForNewConnections = false;
-    while(!shutdown)
-    {
-        // clear fdset, and set the select function wait time
-        int socketsFull=1;
-        maxfdp = 0;
-        FD_ZERO(&readset);
-        FD_ZERO(&writeset);
+    ESP_LOGI(TAG, "esphttpd: active and listening to connections on %s", ctx->serverStr);
+    ctx->shutdown = false;
+    ctx->listeningForNewConnections = false;
+}
 
-        for(x=0; x < maxConnections; x++){
-            RtosConnType *pRconn = &(pInstance->rconn[x]);
-            if (pRconn->fd!=-1) {
-                FD_SET(pRconn->fd, &readset);
-                if (pRconn->needWriteDoneNotif) FD_SET(pRconn->fd, &writeset);
-                if (pRconn->fd>maxfdp) maxfdp = pRconn->fd;
-            } else {
-                socketsFull=0;
-            }
+/**
+ * Manually execute the server task loop function once
+ */
+void platHttpServerTaskProcess(ServerTaskContext *ctx) {
+    // clear fdset, and set the select function wait time
+    fd_set readset,writeset;
+    int socketsFull=1;
+    int maxfdp = 0;
+    FD_ZERO(&readset);
+    FD_ZERO(&writeset);
+
+    int idxConnection = 0;
+    for(idxConnection=0; idxConnection < ctx->pInstance->httpdInstance.maxConnections; idxConnection++){
+        RtosConnType *pRconn = &(ctx->pInstance->rconn[idxConnection]);
+        if (pRconn->fd!=-1) {
+            FD_SET(pRconn->fd, &readset);
+            if (pRconn->needWriteDoneNotif) FD_SET(pRconn->fd, &writeset);
+            if (pRconn->fd>maxfdp) maxfdp = pRconn->fd;
+        } else {
+            socketsFull=0;
         }
+    }
 
-        if (!socketsFull) {
-            FD_SET(listenfd, &readset);
-            if (listenfd>maxfdp) maxfdp=listenfd;
-            ESP_LOGD(TAG, "Sel add listen %d", listenfd);
-            if(!listeningForNewConnections)
-            {
-                listeningForNewConnections = true;
-                ESP_LOGI(TAG, "listening for new connections on '%s'", serverStr);
-            }
-        } else
+    if (!socketsFull) {
+        FD_SET(ctx->listenFd, &readset);
+        if (ctx->listenFd>maxfdp) maxfdp=ctx->listenFd;
+        ESP_LOGD(TAG, "Sel add listen %d", ctx->listenFd);
+        if(!ctx->listeningForNewConnections)
         {
-            if(listeningForNewConnections)
-            {
-                listeningForNewConnections = false;
-                ESP_LOGI(TAG, "all %d connections in use on '%s'", maxConnections, serverStr);
+            ctx->listeningForNewConnections = true;
+            ESP_LOGI(TAG, "listening for new connections on '%s'", ctx->serverStr);
+        }
+    } else
+    {
+        if(ctx->listeningForNewConnections)
+        {
+            ctx->listeningForNewConnections = false;
+            ESP_LOGI(TAG, "all %d connections in use on '%s'", ctx->pInstance->httpdInstance.maxConnections, ctx->serverStr);
+        }
+    }
+
+#ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
+    FD_SET(ctx->udpListenFd, &readset);
+    if(ctx->udpListenFd > maxfdp) maxfdp = ctx->udpListenFd;
+#endif
+
+    //polling all exist client handle,wait until readable/writable
+    int32 retSelect = select(maxfdp+1, &readset, &writeset, NULL, NULL);//&timeout
+    ESP_LOGD(TAG, "select retSelect");
+    if(retSelect > 0){
+#ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
+        if (FD_ISSET(ctx->udpListenFd, &readset)) {
+            ctx->shutdown = true;
+            ESP_LOGI(TAG, "shutting down");
+        }
+#endif
+
+        //See if we need to accept a new connection
+        if (FD_ISSET(ctx->listenFd, &readset)) {
+            int32 len = sizeof(struct sockaddr_in);
+            struct sockaddr_in remote_addr;
+            ctx->remoteFd = accept(ctx->listenFd, (struct sockaddr *)&remote_addr, (socklen_t *)&len);
+            if (ctx->remoteFd<0) {
+                ESP_LOGE(TAG, "accept failed");
+                perror("accept");
+                return;
             }
+            
+            int highestConnection = 0;
+            for(highestConnection=0; highestConnection < ctx->pInstance->httpdInstance.maxConnections; highestConnection++) if (ctx->pInstance->rconn[highestConnection].fd==-1) break;
+            if (highestConnection == ctx->pInstance->httpdInstance.maxConnections) {
+                ESP_LOGE(TAG, "all connections in use, closing fd");
+                close(ctx->remoteFd);
+                return;
+            }
+
+            RtosConnType *pRconn = &(ctx->pInstance->rconn[highestConnection]);
+
+            int keepAlive = 1; //enable keepalive
+            int keepIdle = 60; //60s
+            int keepInterval = 5; //5s
+            int keepCount = 3; //retry times
+            int nodelay = 0;
+#ifdef CONFIG_ESPHTTPD_TCP_NODELAY
+            nodelay = 1;  // enable TCP_NODELAY to speed-up transfers of small files.  See Nagle's Algorithm.
+#endif
+            setsockopt(ctx->remoteFd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepAlive, sizeof(keepAlive));
+            setsockopt(ctx->remoteFd, IPPROTO_TCP, TCP_KEEPIDLE, (void*)&keepIdle, sizeof(keepIdle));
+            setsockopt(ctx->remoteFd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepInterval, sizeof(keepInterval));
+            setsockopt(ctx->remoteFd, IPPROTO_TCP, TCP_KEEPCNT, (void *)&keepCount, sizeof(keepCount));
+            setsockopt(ctx->remoteFd, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof(nodelay));
+
+            pRconn->fd=ctx->remoteFd;
+            pRconn->needWriteDoneNotif=0;
+            pRconn->needsClose=0;
+
+#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
+            if(ctx->pInstance->httpdFlags & HTTPD_FLAG_SSL)
+            {
+                ESP_LOGD(TAG, "SSL server create .....");
+                pRconn->ssl = SSL_new(ctx->pInstance->ctx);
+                if (!pRconn->ssl) {
+                    ESP_LOGE(TAG, "SSL_new");
+                    close(ctx->remoteFd);
+                    pRconn->fd = -1;
+                    continue;
+                }
+                ESP_LOGD(TAG, "OK");
+
+                SSL_set_fd(pRconn->ssl, pRconn->fd);
+
+                ESP_LOGD(TAG, "SSL server accept client .....");
+                int32 retAcceptSSL = SSL_accept(pRconn->ssl);
+                if (!retAcceptSSL) {
+                    int ssl_error = SSL_get_error(pRconn->ssl, retAcceptSSL);
+                    ESP_LOGE(TAG, "SSL_accept %d", ssl_error);
+                    close(ctx->remoteFd);
+                    SSL_free(pRconn->ssl);
+                    pRconn->fd = -1;
+                    continue;
+                }
+                ESP_LOGD(TAG, "OK");
+            }
+#endif
+            struct sockaddr name;
+            len=sizeof(name);
+            getpeername(ctx->remoteFd, &name, (socklen_t *)&len);
+            struct sockaddr_in *piname=(struct sockaddr_in *)&name;
+
+            pRconn->port = piname->sin_port;
+            memcpy(&pRconn->ip, &piname->sin_addr.s_addr, sizeof(pRconn->ip));
+
+            // NOTE: httpdConnectCb cannot fail
+            httpdConnectCb(&ctx->pInstance->httpdInstance, &pRconn->connData);
         }
 
-#ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
-        FD_SET(udpListenfd, &readset);
-        if(udpListenfd > maxfdp) maxfdp = udpListenfd;
-#endif
+        //See if anything happened on the existing connections.
+        int idxCheckConnection = 0;
+        for(idxCheckConnection=0; idxCheckConnection < ctx->pInstance->httpdInstance.maxConnections; idxCheckConnection++) {
+            RtosConnType *pRconn = &(ctx->pInstance->rconn[idxCheckConnection]);
 
-        //polling all exist client handle,wait until readable/writable
-        ret = select(maxfdp+1, &readset, &writeset, NULL, NULL);//&timeout
-        ESP_LOGD(TAG, "select ret");
-        if(ret > 0){
-#ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
-            if (FD_ISSET(udpListenfd, &readset)) {
-                shutdown = true;
-                ESP_LOGI(TAG, "shutting down");
+            //Skip empty slots
+            if (pRconn->fd==-1) continue;
+
+            //Check for write availability first: the read routines may write needWriteDoneNotif while
+            //the select didn't check for that.
+            if (pRconn->needWriteDoneNotif && FD_ISSET(pRconn->fd, &writeset)) {
+                pRconn->needWriteDoneNotif=0; //Do this first, httpdSentCb may write something making this 1 again.
+                if (pRconn->needsClose) {
+                    //Do callback and close fd.
+                    closeConnection(ctx->pInstance, pRconn);
+                } else {
+                    if(httpdSentCb(&ctx->pInstance->httpdInstance, &pRconn->connData) != CallbackSuccess)
+                    {
+                        closeConnection(ctx->pInstance, pRconn);
+                    }
+                }
             }
-#endif
 
-            //See if we need to accept a new connection
-            if (FD_ISSET(listenfd, &readset)) {
-                len=sizeof(struct sockaddr_in);
-                remotefd = accept(listenfd, (struct sockaddr *)&remote_addr, (socklen_t *)&len);
-                if (remotefd<0) {
-                    ESP_LOGE(TAG, "accept failed");
-                    perror("accept");
-                    continue;
-                }
-                for(x=0; x < maxConnections; x++) if (pInstance->rconn[x].fd==-1) break;
-                if (x == maxConnections) {
-                    ESP_LOGE(TAG, "all connections in use, closing fd");
-                    close(remotefd);
-                    continue;
-                }
-
-                RtosConnType *pRconn = &(pInstance->rconn[x]);
-
-                int keepAlive = 1; //enable keepalive
-                int keepIdle = 60; //60s
-                int keepInterval = 5; //5s
-                int keepCount = 3; //retry times
-                int nodelay = 0;
-#ifdef CONFIG_ESPHTTPD_TCP_NODELAY
-                nodelay = 1;  // enable TCP_NODELAY to speed-up transfers of small files.  See Nagle's Algorithm.
-#endif
-                setsockopt(remotefd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepAlive, sizeof(keepAlive));
-                setsockopt(remotefd, IPPROTO_TCP, TCP_KEEPIDLE, (void*)&keepIdle, sizeof(keepIdle));
-                setsockopt(remotefd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepInterval, sizeof(keepInterval));
-                setsockopt(remotefd, IPPROTO_TCP, TCP_KEEPCNT, (void *)&keepCount, sizeof(keepCount));
-                setsockopt(remotefd, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof(nodelay));
-
-                pRconn->fd=remotefd;
-                pRconn->needWriteDoneNotif=0;
-                pRconn->needsClose=0;
-
+            if (FD_ISSET(pRconn->fd, &readset)) {
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
-                if(pInstance->httpdFlags & HTTPD_FLAG_SSL)
+                if(ctx->pInstance->httpdFlags & HTTPD_FLAG_SSL)
                 {
-                    ESP_LOGD(TAG, "SSL server create .....");
-                    pRconn->ssl = SSL_new(pInstance->ctx);
-                    if (!pRconn->ssl) {
-                        ESP_LOGE(TAG, "SSL_new");
-                        close(remotefd);
-                        pRconn->fd = -1;
-                        continue;
-                    }
-                    ESP_LOGD(TAG, "OK");
+                    int bytesStillAvailable;
 
-                    SSL_set_fd(pRconn->ssl, pRconn->fd);
+                    // NOTE: we repeat the call to SSL_read() and process data
+                    // while SSL indicates there is still pending data.
+                    //
+                    // select() isn't detecting available data, this
+                    // re-read approach resolves an issue where data is stuck in
+                    // SSL internal buffers
+                    do {
+                        int32 retReadSSL = SSL_read(pRconn->ssl, &ctx->pInstance->precvbuf, RECV_BUF_SIZE - 1);
 
-                    ESP_LOGD(TAG, "SSL server accept client .....");
-                    ret = SSL_accept(pRconn->ssl);
-                    if (!ret) {
-                        int ssl_error = SSL_get_error(pRconn->ssl, ret);
-                        ESP_LOGE(TAG, "SSL_accept %d", ssl_error);
-                        close(remotefd);
-                        SSL_free(pRconn->ssl);
-                        pRconn->fd = -1;
-                        continue;
-                    }
-                    ESP_LOGD(TAG, "OK");
-                }
-#endif
+                        bytesStillAvailable = SSL_has_pending(pRconn->ssl);
 
-                len=sizeof(name);
-                getpeername(remotefd, &name, (socklen_t *)&len);
-                struct sockaddr_in *piname=(struct sockaddr_in *)&name;
-
-                pRconn->port = piname->sin_port;
-                memcpy(&pRconn->ip, &piname->sin_addr.s_addr, sizeof(pRconn->ip));
-
-                // NOTE: httpdConnectCb cannot fail
-                httpdConnectCb(&pInstance->httpdInstance, &pRconn->connData);
-            }
-
-            //See if anything happened on the existing connections.
-            for(x=0; x < maxConnections; x++) {
-                RtosConnType *pRconn = &(pInstance->rconn[x]);
-
-                //Skip empty slots
-                if (pRconn->fd==-1) continue;
-
-                //Check for write availability first: the read routines may write needWriteDoneNotif while
-                //the select didn't check for that.
-                if (pRconn->needWriteDoneNotif && FD_ISSET(pRconn->fd, &writeset)) {
-                    pRconn->needWriteDoneNotif=0; //Do this first, httpdSentCb may write something making this 1 again.
-                    if (pRconn->needsClose) {
-                        //Do callback and close fd.
-                        closeConnection(pInstance, pRconn);
-                    } else {
-                        if(httpdSentCb(&pInstance->httpdInstance, &pRconn->connData) != CallbackSuccess)
+                        if(retReadSSL <= 0)
                         {
-                            closeConnection(pInstance, pRconn);
+                            int ssl_error = SSL_get_error(pRconn->ssl, retReadSSL);
+                            if(ssl_error != SSL_ERROR_NONE)
+                            {
+                                ESP_LOGE(TAG, "ssl_error %d, retReadSSL %d, bytesStillAvailable %d", ssl_error, retReadSSL, bytesStillAvailable);
+                            } else
+                            {
+                                ESP_LOGD(TAG, "ssl_error %d, retReadSSL %d, bytesStillAvailable %d", ssl_error, retReadSSL, bytesStillAvailable);
+                            }
                         }
-                    }
-                }
 
-                if (FD_ISSET(pRconn->fd, &readset)) {
-#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
-                    if(pInstance->httpdFlags & HTTPD_FLAG_SSL)
-                    {
-                        int bytesStillAvailable;
-
-                        // NOTE: we repeat the call to SSL_read() and process data
-                        // while SSL indicates there is still pending data.
-                        //
-                        // select() isn't detecting available data, this
-                        // re-read approach resolves an issue where data is stuck in
-                        // SSL internal buffers
-                        do {
-                            ret = SSL_read(pRconn->ssl, &pInstance->precvbuf, RECV_BUF_SIZE - 1);
-
-                            bytesStillAvailable = SSL_has_pending(pRconn->ssl);
-
-                            if(ret <= 0)
-                            {
-                                int ssl_error = SSL_get_error(pRconn->ssl, ret);
-                                if(ssl_error != SSL_ERROR_NONE)
-                                {
-                                    ESP_LOGE(TAG, "ssl_error %d, ret %d, bytesStillAvailable %d", ssl_error, ret, bytesStillAvailable);
-                                } else
-                                {
-                                    ESP_LOGD(TAG, "ssl_error %d, ret %d, bytesStillAvailable %d", ssl_error, ret, bytesStillAvailable);
-                                }
-                            }
-
-                            if (ret > 0) {
-                                //Data received. Pass to httpd.
-                                if(httpdRecvCb(&pInstance->httpdInstance, &pRconn->connData, &pInstance->precvbuf[0], ret) != CallbackSuccess)
-                                {
-                                    closeConnection(pInstance, pRconn);
-                                }
-                            } else {
-                                //recv error,connection close
-                                closeConnection(pInstance, pRconn);
-                            }
-                        } while(bytesStillAvailable);
-                    } else
-                    {
-#endif
-                        ret = recv(pRconn->fd, &pInstance->precvbuf[0], RECV_BUF_SIZE, 0);
-
-                        if (ret > 0) {
+                        if (retReadSSL > 0) {
                             //Data received. Pass to httpd.
-                            if(httpdRecvCb(&pInstance->httpdInstance, &pRconn->connData, &pInstance->precvbuf[0], ret) != CallbackSuccess)
+                            if(httpdRecvCb(&ctx->pInstance->httpdInstance, &pRconn->connData, &ctx->pInstance->precvbuf[0], retReadSSL) != CallbackSuccess)
                             {
-                                closeConnection(pInstance, pRconn);
+                                closeConnection(ctx->pInstance, pRconn);
                             }
                         } else {
                             //recv error,connection close
-                            closeConnection(pInstance, pRconn);
+                            closeConnection(ctx->pInstance, pRconn);
                         }
-#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
-                    }
+                    } while(bytesStillAvailable);
+                } else
+                {
 #endif
+                    int32 retRecv = recv(pRconn->fd, &ctx->pInstance->precvbuf[0], RECV_BUF_SIZE, 0);
+
+                    if (retRecv > 0) {
+                        //Data received. Pass to httpd.
+                        if(httpdRecvCb(&ctx->pInstance->httpdInstance, &pRconn->connData, &ctx->pInstance->precvbuf[0], retRecv) != CallbackSuccess)
+                        {
+                            closeConnection(ctx->pInstance, pRconn);
+                        }
+                    } else {
+                        //recv error,connection close
+                        closeConnection(ctx->pInstance, pRconn);
+                    }
+#ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
                 }
+#endif
             }
         }
     }
 
+}
+
+/**
+ * Manually deinit all data required for processing the server task
+ */
+PLAT_RETURN platHttpServerTaskDeinit(ServerTaskContext *ctx) {
 #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
-    close(listenfd);
-    close(udpListenfd);
+    close(ctx->listenFd);
+    close(ctx->udpListenFd);
 
     // close all open connections
-    for(x=0; x < maxConnections; x++)
+    int idxConnection = 0;
+    for(idxConnection=0; idxConnection < ctx->pInstance->httpdInstance.maxConnections; idxConnection++)
     {
-        RtosConnType *pRconn = &(pInstance->rconn[x]);
+        RtosConnType *pRconn = &(ctx->pInstance->rconn[idxConnection]);
 
         if(pRconn->fd != -1)
         {
-            closeConnection(pInstance, pRconn);
+            closeConnection(ctx->pInstance, pRconn);
         }
     }
 
-    ESP_LOGI(TAG, "httpd on %s exiting", serverStr);
-    pInstance->isShutdown = true;
+    ESP_LOGI(TAG, "httpd on %s exiting", ctx->serverStr);
+    ctx->pInstance->isShutdown = true;
 #endif /* #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT */
 
     PLAT_TASK_EXIT;
 }
+
 
 #ifdef linux
 

@@ -28,6 +28,10 @@
     #define PLAT_RETURN void
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct RtosConnType{
 	int fd;
 	int needWriteDoneNotif;
@@ -182,3 +186,6 @@ void httpdFreertosSslSetClientValidation(HttpdFreertosInstance *pInstance,
  */
 void httpdFreertosSslAddClientCertificate(HttpdFreertosInstance *pInstance,
                                           const void *certificate, size_t certificate_size);
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

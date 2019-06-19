@@ -7,6 +7,10 @@
 #include <libesphttpd/esp.h>  // for sdkconfig.h
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef CONFIG_ESPHTTPD_USE_ESPFS
 #include "httpd.h"
 /**
@@ -24,5 +28,9 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData);
 int tplSend(HttpdConnData *conn, const char *str, int len);
 
 #endif // CONFIG_ESPHTTPD_USE_ESPFS
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif // HTTPDESPFS_H

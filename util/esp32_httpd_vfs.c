@@ -45,7 +45,6 @@ static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
 CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 	FILE *file=connData->cgiData;
 	int len;
-	char buff[FILE_CHUNK_LEN];
 	char filename[MAX_FILENAME_LENGTH + 1];
 	char acceptEncodingBuffer[64];
 	int isGzip;
@@ -123,8 +122,10 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 		return HTTPD_CGI_MORE;
 	}
 
+	char *buff = malloc(FILE_CHUNK_LEN);
 	len=fread(buff, 1, FILE_CHUNK_LEN, file);
 	if (len>0) httpdSend(connData, buff, len);
+	free(buff);
 	if (len!=FILE_CHUNK_LEN) {
 		//We're done.
 		fclose(file);

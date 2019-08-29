@@ -8,7 +8,7 @@ CgiStatus tplWlan(HttpdConnData *connData, char *token, void **arg);
 CgiStatus cgiWiFi(HttpdConnData *connData);
 CgiStatus cgiWiFiConnect(HttpdConnData *connData);
 CgiStatus cgiWiFiSetMode(HttpdConnData *connData);
-CgiStatus cgiWiFiSetChannel(HttpdConnData *connData);
+CgiStatus cgiWiFiAPSettings(HttpdConnData *connData);
 CgiStatus cgiWiFiConnStatus(HttpdConnData *connData);
 
 #ifdef ESP32

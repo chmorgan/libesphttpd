@@ -16,7 +16,7 @@ Some flash handling cgi routines. Used for updating the ESPFS/OTA image.
 #include "esp32_flash.h"
 #include "esp_ota_ops.h"
 #include "esp_log.h"
-#include "esp_flash_data_types.h"
+#include "esp_flash_partitions.h"
 #include "esp_image_format.h"
 
 static const char *TAG = "ota";
@@ -611,7 +611,7 @@ static int check_partition_valid_app(const esp_partition_t *partition)
         .offset = partition->address,
         .size = partition->size,
     };
-    if (esp_image_load(ESP_IMAGE_VERIFY_SILENT, &part_pos, &data) != ESP_OK) {
+	if (esp_image_verify(ESP_IMAGE_VERIFY_SILENT, &part_pos, &data) != ESP_OK) {
         return 0;  // partition does not hold a valid app
     }
     return 1; // App in partition is valid

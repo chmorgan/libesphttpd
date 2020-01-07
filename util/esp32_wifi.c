@@ -788,7 +788,9 @@ static void handle_config_timer(TimerHandle_t timer)
         (void) esp_wifi_disconnect();
         set_wifi_cfg(&(cfg_state.new));
 
-        if(cfg_state.new.mode == WIFI_MODE_AP || !cfg_state.new.connect){
+        if(cfg_state.new.mode == WIFI_MODE_AP || 
+          cfg_state.new.mode == WIFI_MODE_NULL || 
+          !cfg_state.new.connect){
             /* AP-only mode or not connecting, we are done. */
             cfg_state.state = cfg_state_idle;
         } else {
@@ -815,6 +817,8 @@ static void handle_config_timer(TimerHandle_t timer)
         break;
     case cfg_state_fallback:
         /* Something went wrong, try going back to the previous config. */
+        ESP_LOGI(TAG, "[%s] restoring saved Wifi config.",
+                 __FUNCTION__);
         (void) esp_wifi_disconnect();
         set_wifi_cfg(&(cfg_state.saved));
         cfg_state.state = cfg_state_failed;
@@ -915,7 +919,8 @@ static esp_err_t update_wifi(struct wifi_cfg_state *cfg, struct wifi_cfg *new)
         return ESP_ERR_TIMEOUT;
     }
 
-    if(cfg->state > cfg_state_idle){
+    if (new->mode != WIFI_MODE_NULL && cfg->state > cfg_state_idle)
+    {
         ESP_LOGI(TAG, "[%s] Already connecting.", __FUNCTION__);
         result = ESP_ERR_INVALID_STATE;
         goto err_out;

@@ -109,4 +109,11 @@ config ESPHTTPD_SINGLE_REQUEST
 	help
 		Include the "Connection: close" header.  This is useful for captive portals.	
 
+config ESPHTTPD_ALLOW_OTA_FACTORY_APP
+	bool "Allow OTA of Factory Partition (not recommended)"
+	depends on ESPHTTPD_ENABLED
+	default n
+	help
+		Allows cgiUploadFirmware() in cgiflash.c to write to the Factory partition.  It it not recommended for production use.
+
 endmenu

@@ -26,6 +26,10 @@ static const char *TAG = "ota";
 #define UPGRADE_FLAG_FINISH     0x02
 #endif
 
+#define PARTITION_IS_FACTORY(partition) ((partition->type == ESP_PARTITION_TYPE_APP) && (partition->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY))
+#define PARTITION_IS_OTA(partition) ((partition->type == ESP_PARTITION_TYPE_APP) && (partition->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_MIN) && (partition->subtype <= ESP_PARTITION_SUBTYPE_APP_OTA_MAX))
+
+
 // Check that the header of the firmware blob looks like actual firmware...
 static int ICACHE_FLASH_ATTR checkBinHeader(void *buf) {
 	uint8_t *cd = (uint8_t *)buf;
@@ -234,7 +238,22 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			    {
 			    	ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x", state->update_partition->subtype, state->update_partition->address);
 
-					err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
+#ifdef CONFIG_ESPHTTPD_ALLOW_OTA_FACTORY_APP
+					// hack the API to allow write to the factory partition!
+					if (PARTITION_IS_FACTORY(state->update_partition))
+					{
+						esp_partition_subtype_t old_subtype = state->update_partition->subtype;
+						esp_partition_subtype_t *pst = &(state->update_partition->subtype); // remove the const
+						*pst = ESP_PARTITION_SUBTYPE_APP_OTA_MAX -1; // hack! set the type to an OTA to trick API into allowing write.
+						err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
+						*pst = old_subtype; // put the value back to original now
+					}
+					else 
+#endif
+					{
+						err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
+					}
+
 					if (err != ESP_OK)
 					{
 						ESP_LOGE(TAG, "esp_ota_begin failed, error=%d", err);
@@ -617,8 +636,6 @@ static int check_partition_valid_app(const esp_partition_t *partition)
     return 1; // App in partition is valid
 }
 
-#define PARTITION_IS_FACTORY(partition)  ((partition->type == ESP_PARTITION_TYPE_APP) && (partition->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY))
-#define PARTITION_IS_OTA(partition)  ((partition->type == ESP_PARTITION_TYPE_APP) && (partition->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_MIN) && (partition->subtype <= ESP_PARTITION_SUBTYPE_APP_OTA_MAX))
 // Cgi to query info about partitions and firmware
 CgiStatus ICACHE_FLASH_ATTR cgiGetFlashInfo(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
@@ -683,8 +700,12 @@ CgiStatus ICACHE_FLASH_ATTR cgiGetFlashInfo(HttpdConnData *connData) {
     			cJSON_AddStringToObject(partj, "name", it_partition->label);
     			cJSON_AddNumberToObject(partj, "size", it_partition->size);
     			cJSON_AddStringToObject(partj, "version", "");  // todo
-    			cJSON_AddBoolToObject(partj, "ota", PARTITION_IS_OTA(it_partition));
-    			if (verify_app)
+#ifdef CONFIG_ESPHTTPD_ALLOW_OTA_FACTORY_APP
+				cJSON_AddBoolToObject(partj, "ota", true);
+#else
+				cJSON_AddBoolToObject(partj, "ota", PARTITION_IS_OTA(it_partition));
+#endif
+				if (verify_app)
     			{
     				cJSON_AddBoolToObject(partj, "valid", check_partition_valid_app(it_partition));
     			}

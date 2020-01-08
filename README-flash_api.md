@@ -29,6 +29,11 @@ CGI function to erase flash memory.  (only supports erasing data partitions)
 * __cgiGetFlashInfo()__
 CGI function returns a JSON object describing the partition table.  It can also verify the firmware images, but not by default because that process takes several seconds.
 
+## Configuration Options
+
+* __Allow OTA of Factory Partition (not recommended)__
+Defines CONFIG_ESPHTTPD_ALLOW_OTA_FACTORY_APP.  This option allows cgiUploadFirmware() (in cgiflash.c) to write to the Factory partition.  It it not recommended for production use.  It is useful if you need to update the factory app via OTA for some reason.  To use it, build this project with CONFIG_ESPHTTPD_ALLOW_OTA_FACTORY_APP and upload it to one of the OTA partitions on your device.  Then reboot your device into that OTA and then you will be able to upload an image to the factory partition.
+
 ## HTTP REST API
 
 The flash API is specified in RAML.  (see https://raml.org)

@@ -245,7 +245,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 						esp_partition_subtype_t old_subtype = state->update_partition->subtype;
 						esp_partition_subtype_t *pst = &(state->update_partition->subtype); // remove the const
 						*pst = ESP_PARTITION_SUBTYPE_APP_OTA_MAX -1; // hack! set the type to an OTA to trick API into allowing write.
-						err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
+					err = esp_ota_begin(state->update_partition, OTA_SIZE_UNKNOWN, &state->update_handle);
 						*pst = old_subtype; // put the value back to original now
 					}
 					else 
@@ -699,13 +699,26 @@ CgiStatus ICACHE_FLASH_ATTR cgiGetFlashInfo(HttpdConnData *connData) {
     			partj = cJSON_CreateObject();
     			cJSON_AddStringToObject(partj, "name", it_partition->label);
     			cJSON_AddNumberToObject(partj, "size", it_partition->size);
-    			cJSON_AddStringToObject(partj, "version", "");  // todo
+
+                // Note esp_ota_get_partition_description() was introduced in ESP-IDF 3.3.
+#ifdef ESP_APP_DESC_MAGIC_WORD // enable functionality only if present in IDF by testing for macro.
+                esp_app_desc_t app_info;
+                if (esp_ota_get_partition_description(it_partition, &app_info) == ESP_OK)
+                {
+                    cJSON_AddStringToObject(partj, "project_name", app_info.project_name);
+                    cJSON_AddStringToObject(partj, "version", app_info.version);
+                }
+                else
+#endif
+                {
+                    cJSON_AddStringToObject(partj, "version", "");
+                }
 #ifdef CONFIG_ESPHTTPD_ALLOW_OTA_FACTORY_APP
 				cJSON_AddBoolToObject(partj, "ota", true);
 #else
-				cJSON_AddBoolToObject(partj, "ota", PARTITION_IS_OTA(it_partition));
+    			cJSON_AddBoolToObject(partj, "ota", PARTITION_IS_OTA(it_partition));
 #endif
-				if (verify_app)
+    			if (verify_app)
     			{
     				cJSON_AddBoolToObject(partj, "valid", check_partition_valid_app(it_partition));
     			}

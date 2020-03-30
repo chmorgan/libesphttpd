@@ -1,8 +1,14 @@
 #ESP-IDF Kconfig configuration file. Not used for ESP8266 RTOS/non-RTOS SDKs.
 menu "esphttpd"
 
+menuconfig ESPHTTPD_ENABLED
+    bool "esphttpd"
+    help
+        Select this option to enable libesphttpd and show the submodule with libesphttpd configuration
+
 config ESPHTTPD_STACK_SIZE
 	int "Stack size of ESP-HTTPD task"
+        depends on ESPHTTPD_ENABLED
 	range 1024 16384
 	default 4096
 	help
@@ -10,6 +16,7 @@ config ESPHTTPD_STACK_SIZE
 
 config ESPHTTPD_PROC_AFFINITY
 	bool "Processor Affinity Support"
+        depends on ESPHTTPD_ENABLED
 	default n
 	help
 		Enable Processor Affinity Support
@@ -24,6 +31,7 @@ config ESPHTTPD_PROC_CORE
 
 config ESPHTTPD_PROC_PRI
 	int "Process Task Priority"
+        depends on ESPHTTPD_ENABLED
 	range 1 17
 	default 4
 	help
@@ -31,24 +39,28 @@ config ESPHTTPD_PROC_PRI
 
 config ESPHTTPD_SHUTDOWN_SUPPORT
 	bool "Enable shutdown support"
+	depends on ESPHTTPD_ENABLED
 	default n
 	help
 		Add support for server shutdown. Adds ~500 bytes of code.
 
 config ESPHTTPD_CORS_SUPPORT
     bool "CORS support"
+        depends on ESPHTTPD_ENABLED
     help
         Enable support for CORS, cross origin resource sharing.
         NOTE: Requires 256 bytes of RAM for each connection
 
 config ESPHTTPD_USE_ESPFS
-	bool "Enable espfs integration"
+	bool "Enable espfs filesystem"
+        depends on ESPHTTPD_ENABLED
 	default y
 	help
-		Enables integration with espfs (readonly) filesystem.  You need to include espfs component in your project if enabled.
+		Enables integration with espfs (readonly) filesystem.  You need to include espfs submodule in your project if enabled.
 
 config ESPHTTPD_SO_REUSEADDR
 	bool "Set SO_REUSEADDR to avoid waiting for a port in TIME_WAIT."
+	depends on ESPHTTPD_ENABLED
 	default n
 	help
 		Requires LWIP_SO_REUSE to be enabled.
@@ -58,12 +70,14 @@ config ESPHTTPD_SO_REUSEADDR
 
 config ESPHTTPD_TCP_NODELAY
 	bool "Set TCP_NODELAY."
+	depends on ESPHTTPD_ENABLED
 	default y
 	help
 		Set TCP_NODELAY to avoid waiting for a ACK to send multiple small frames (It will disable Nagle's TCP Algorithm).  It can speed-up transfers for small files.
 
 config ESPHTTPD_SSL_SUPPORT
 	bool "Enable SSL support"
+        depends on ESPHTTPD_ENABLED
 	default n
 	help
 		SSL connections require ~32k of ram each.
@@ -72,6 +86,7 @@ config ESPHTTPD_SSL_SUPPORT
 
 config ESPHTTPD_BACKLOG_SUPPORT
 	bool "Write data to backlog when it can't be sent"
+        depends on ESPHTTPD_ENABLED
 	default n
 	help
 		A non-os specific option. FreeRTOS uses blocking sockets so data will always be sent and there is
@@ -81,6 +96,7 @@ config ESPHTTPD_BACKLOG_SUPPORT
 
 config ESPHTTPD_SANITIZE_URLS
 	bool "Sanitize client requests"
+	depends on ESPHTTPD_ENABLED
 	default y
 	help
 		Sanitize client's URL requests by treating multiple repeated slashes in the

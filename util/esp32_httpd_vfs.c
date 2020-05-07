@@ -110,6 +110,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 
 	//First call to this cgi.
 	if (file==NULL) {
+		isGzip = 0;
 		if (connData->requestType!=HTTPD_METHOD_GET) {
 			return HTTPD_CGI_NOTFOUND;  //	return and allow another cgi function to handle it
 		}

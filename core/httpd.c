@@ -815,6 +815,8 @@ CallbackStatus ICACHE_FLASH_ATTR httpdRecvCb(HttpdInstance *pInstance, HttpdConn
                 } else
                 {
                     ESP_LOGE(TAG, "adding newline request too long");
+                    status = CallbackErrorMemory;
+                    break;
                 }
             }
 
@@ -825,6 +827,8 @@ CallbackStatus ICACHE_FLASH_ATTR httpdRecvCb(HttpdInstance *pInstance, HttpdConn
             } else
             {
                 ESP_LOGE(TAG, "request too long!");
+                status = CallbackErrorMemory;
+                break;
             }
 
             // always null terminate

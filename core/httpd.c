@@ -294,19 +294,19 @@ int ICACHE_FLASH_ATTR httpdSend(HttpdConnData *conn, const char *data, int len) 
     if (len==0) return 0;
     if (conn->priv.flags&HFL_CHUNKED && conn->priv.flags&HFL_SENDINGBODY && conn->priv.chunkHdr==NULL)
     {
-        if (conn->priv.sendBuffLen+len+CHUNK_SIZE_TEXT_LEN > HTTPD_MAX_SENDBUFF_LEN) return 0;
+        if (conn->priv.sendBuffLen+len+CHUNK_SIZE_TEXT_LEN > HTTPD_SENDBUFF_MAX_FILL) return 0;
 
         // Establish start of chunk
         // Use a chunk length placeholder of 4 characters
         conn->priv.chunkHdr = &conn->priv.sendBuff[conn->priv.sendBuffLen];
         strcpy(conn->priv.chunkHdr, CHUNK_SIZE_TEXT);
         conn->priv.sendBuffLen+=CHUNK_SIZE_TEXT_LEN;
-        assert(conn->priv.sendBuffLen <= HTTPD_MAX_SENDBUFF_LEN);
+        assert(conn->priv.sendBuffLen <= HTTPD_SENDBUFF_MAX_FILL);
     }
-    if (conn->priv.sendBuffLen+len > HTTPD_MAX_SENDBUFF_LEN) return 0;
+    if (conn->priv.sendBuffLen+len > HTTPD_SENDBUFF_MAX_FILL) return 0;
     memcpy(conn->priv.sendBuff+conn->priv.sendBuffLen, data, len);
     conn->priv.sendBuffLen+=len;
-    assert(conn->priv.sendBuffLen <= HTTPD_MAX_SENDBUFF_LEN);
+    assert(conn->priv.sendBuffLen <= HTTPD_SENDBUFF_MAX_FILL);
     return 1;
 }
 
@@ -395,7 +395,14 @@ void ICACHE_FLASH_ATTR httpdFlushSendBuffer(HttpdInstance *pInstance, HttpdConnD
     if (conn->priv.chunkHdr!=NULL) {
         //We're sending chunked data, and the chunk needs fixing up.
         //Finish chunk with cr/lf
-        httpdSend(conn, "\r\n", 2);
+        if(conn->priv.sendBuffLen + 2 <= HTTPD_SENDBUFF_SIZE) {
+            // Add chunk closing.
+            strcpy(&conn->priv.sendBuff[conn->priv.sendBuffLen], "\r\n");
+            conn->priv.sendBuffLen += 2;
+            assert(conn->priv.sendBuffLen <= HTTPD_SENDBUFF_SIZE);
+        } else {
+            ESP_LOGE(TAG, "sendBuff full");
+        }
         //Calculate length of chunk
         // +2 is to remove the two characters written above via httpdSend(), those
         // bytes aren't counted in the chunk length
@@ -409,12 +416,12 @@ void ICACHE_FLASH_ATTR httpdFlushSendBuffer(HttpdInstance *pInstance, HttpdConnD
         conn->priv.chunkHdr=NULL;
     }
     if (conn->priv.flags&HFL_CHUNKED && conn->priv.flags&HFL_SENDINGBODY && conn->cgi==NULL) {
-        if(conn->priv.sendBuffLen + 5 <= HTTPD_MAX_SENDBUFF_LEN)
+        if(conn->priv.sendBuffLen + 5 <= HTTPD_SENDBUFF_SIZE)
         {
             //Connection finished sending whatever needs to be sent. Add NULL chunk to indicate this.
             strcpy(&conn->priv.sendBuff[conn->priv.sendBuffLen], "0\r\n\r\n");
             conn->priv.sendBuffLen+=5;
-            assert(conn->priv.sendBuffLen <= HTTPD_MAX_SENDBUFF_LEN);
+            assert(conn->priv.sendBuffLen <= HTTPD_SENDBUFF_SIZE);
         } else
         {
             ESP_LOGE(TAG, "sendBuff full");

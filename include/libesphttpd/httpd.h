@@ -37,6 +37,7 @@ extern "C" {
 #define HTTPD_SENDBUFF_SIZE	2048
 #endif
 
+//Send buffer limit for httpdSend. 2 bytes are reserved for chunk termination ('\r\n').
 #ifndef HTTPD_SENDBUFF_MAX_FILL
 #define HTTPD_SENDBUFF_MAX_FILL	HTTPD_SENDBUFF_SIZE - 2
 #endif

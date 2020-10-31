@@ -39,7 +39,12 @@ extern "C" {
 
 //Send buffer limit for httpdSend. 2 bytes are reserved for chunk termination ('\r\n').
 #ifndef HTTPD_SENDBUFF_MAX_FILL
-#define HTTPD_SENDBUFF_MAX_FILL	HTTPD_SENDBUFF_SIZE - 2
+#define HTTPD_SENDBUFF_MAX_FILL	(HTTPD_SENDBUFF_SIZE - 2)
+#endif
+
+//Send buffer limit (for backward compatibility
+#ifndef HTTPD_MAX_SENDBUFF_LEN
+#define HTTPD_MAX_SENDBUFF_LEN HTTPD_SENDBUFF_MAX_FILL
 #endif
 
 //If some data can't be sent because the underlaying socket doesn't accept the data (like the nonos

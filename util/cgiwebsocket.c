@@ -13,6 +13,7 @@ Websocket support for esphttpd. Inspired by https://github.com/dangrie158/ESP-82
 #endif
 
 #include "libesphttpd/httpd.h"
+#include "httpd-platform.h"
 #include "libesphttpd/sha1.h"
 #include "libesphttpd_base64.h"
 #include "libesphttpd/cgiwebsocket.h"
@@ -129,9 +130,11 @@ int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, co
         return WEBSOCK_CLOSED;
     }
 
+	httpdPlatLock(pInstance);
 	sendFrameHead(ws, fl, len);
 	if (len!=0) r=httpdSend(ws->conn, data, len);
 	httpdFlushSendBuffer(pInstance, ws->conn);
+	httpdPlatUnlock(pInstance);
 	return r;
 }
 
@@ -154,10 +157,12 @@ int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *
 
 void ICACHE_FLASH_ATTR cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, int reason) {
 	char rs[2]={reason>>8, reason&0xff};
+	httpdPlatLock(pInstance);
 	sendFrameHead(ws, FLAG_FIN|OPCODE_CLOSE, 2);
 	httpdSend(ws->conn, rs, 2);
 	ws->priv->closedHere=1;
 	httpdFlushSendBuffer(pInstance, ws->conn);
+	httpdPlatUnlock(pInstance);
 }
 
 

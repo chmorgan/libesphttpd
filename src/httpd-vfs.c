@@ -5,17 +5,21 @@
 /*
 Connector to let httpd use the vfs filesystem to serve the files in it.
 */
-#include <stdio.h>
-#include <string.h>
+#ifdef linux
+#include <libesphttpd/linux.h>
+#else
+#include <libesphttpd/esp.h>
+#endif
+
 #include <sys/unistd.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
-#include "esp_err.h"
 #include "esp_log.h"
-#include "libesphttpd/esp.h"
 #include "libesphttpd/httpd.h"
 #include "httpd-platform.h"
-#include "cJSON.h"
+#ifndef LINUX
+# include "cJSON.h"
+#endif
 
 #define FILE_CHUNK_LEN    (1024)
 #define MAX_FILENAME_LENGTH (1024)
@@ -26,6 +30,7 @@ Connector to let httpd use the vfs filesystem to serve the files in it.
 // If the client does not advertise that he accepts GZIP send following warning message (telnet users for e.g.)
 static const char *gzipNonSupportedMessage = "HTTP/1.0 501 Not implemented\r\nServer: esp8266-httpd/"HTTPDVER"\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 52\r\n\r\nYour browser does not accept gzip-compressed data.\r\n";
 
+#ifndef LINUX
 static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
 	char *json_string = NULL;
 
@@ -44,6 +49,7 @@ static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
     }
     cJSON_Delete(jsroot);
 }
+#endif
 
 static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 {
@@ -53,12 +59,15 @@ static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 	if (connData->cgiArg != &httpdCgiEx) {
 		filepath[0] = '\0';
 		if (connData->cgiArg != NULL) {
-			outlen = strlcpy(filepath, connData->cgiArg, len);
+			strncpy(filepath, connData->cgiArg, len);
+			filepath[len - 1] = '\0';
+			outlen = strlen(filepath);
 			if (stat(filepath, &s) == 0 && S_ISREG(s.st_mode)) {
 				return outlen;
 			}
 		}
-		return strlcat(filepath, connData->url, len);
+		strncat(filepath, connData->url, len - 1);
+		return strlen(filepath);
 	}
 
 	HttpdCgiExArg *ex = (HttpdCgiExArg *)connData->cgiArg2;
@@ -71,19 +80,25 @@ static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 
 	size_t basepathLen = strlen(ex->basepath);
 	if (!ex->basepath || basepathLen == 0) {
-		return strlcpy(filepath, url, len);
+		strncpy(filepath, url, len);
+		filepath[len - 1] = '\0';
+		outlen = strlen(filepath);
+		return outlen;
 	}
 
 	if (url[0] == '/') {
 		url++;
 	}
 
-	outlen = strlcpy(filepath, ex->basepath, len);
+	strncpy(filepath, ex->basepath, len);
+	filepath[len - 1] = '\0';
+	outlen = strlen(filepath);
 	if (stat(ex->basepath, &s) != 0 || S_ISDIR(s.st_mode)) {
 		if (ex->basepath[basepathLen - 1] != '/') {
-			strlcat(filepath, "/", len);
+			strncat(filepath, "/", len - 1);
 		}
-		outlen = strlcat(filepath, url, len);
+		strncat(filepath, url, len - 1);
+		outlen = strlen(filepath);
 	}
 	return outlen;
 }
@@ -361,9 +376,9 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsTemplate(HttpdConnData *connData) {
 	}
 }
 
-static esp_err_t createMissingDirectories(char *fullpath) {
+static int createMissingDirectories(char *fullpath) {
 	char *string, *tofree;
-	int err = ESP_OK;
+	int err = 0;
 	tofree = string = strndup(fullpath, MAX_FILENAME_LENGTH); // make a copy because modifies input
 	assert(string != NULL);
 
@@ -384,7 +399,7 @@ static esp_err_t createMissingDirectories(char *fullpath) {
 					if (e != 0)
 					{
 						ESP_LOGE(__func__, "mkdir failed; errno=%d\n",errno);
-						err = ESP_FAIL;
+						err = 1;
 						break;
 					}
 					else
@@ -408,6 +423,7 @@ typedef struct {
 	const char *errtxt;
 } UploadState;
 
+#ifndef LINUX
 CgiStatus   cgiEspVfsUpload(HttpdConnData *connData) {
 	UploadState *state=(UploadState *)connData->cgiData;
     
@@ -456,7 +472,10 @@ CgiStatus   cgiEspVfsUpload(HttpdConnData *connData) {
 			state->state=UPSTATE_ERR;
 			goto error_first;
 		}
-		int n = strlcpy(state->filename, basePath, MAX_FILENAME_LENGTH);
+		strncpy(state->filename, basePath, MAX_FILENAME_LENGTH);
+		state->filename[MAX_FILENAME_LENGTH - 1] = '\0';
+		int n = strlen(state->filename);
+
 		if (n >= MAX_FILENAME_LENGTH) goto error_first;
 
 		// Is cgiArg a single file or a directory (with trailing slash)?
@@ -495,14 +514,14 @@ CgiStatus   cgiEspVfsUpload(HttpdConnData *connData) {
 			// Filename to write to is forced to cgiArg.  The filename specified in the PUT url or in the POST filename is simply ignored.
 			//   (Anyway, a proper ROUTE entry should enforce the PUT url matches the cgiArg. i.e.
 			//   ROUTE_CGI_ARG("/writeable_file.txt", cgiEspVfsPut, FS_BASE_PATH "/html/writeable_file.txt"))
-			// filename is already = basePath from strlcpy() above.
+			// filename is already = basePath from strncpy() above.
 		}
 
 
 		ESP_LOGI(__func__, "Uploading: %s", state->filename);
 
 		// Create missing directories
-		if (createMissingDirectories(state->filename) != ESP_OK)
+		if (createMissingDirectories(state->filename) != 0)
 		{
 			state->errtxt="Error creating directory!";
 			state->state=UPSTATE_ERR;
@@ -570,3 +589,4 @@ error_first:
 		return HTTPD_CGI_MORE;
 	}
 }
+#endif

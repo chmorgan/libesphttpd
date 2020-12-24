@@ -12,15 +12,12 @@ Thanks to my collague at Espressif for writing the foundations of this code.
 /* Copyright 2017 Jeroen Domburg <git@j0h.nl> */
 /* Copyright 2017 Chris Morgan <chmorgan@gmail.com> */
 
-#if defined(linux) || defined(FREERTOS)
-
-#ifdef linux
+#ifdef LINUX
 #include <libesphttpd/linux.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-
 #else
 #include <libesphttpd/esp.h>
 #endif
@@ -32,7 +29,7 @@ Thanks to my collague at Espressif for writing the foundations of this code.
 
 #include "esp_log.h"
 
-#ifdef FREERTOS
+#ifndef LINUX
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -75,7 +72,7 @@ void httpdPlatDisableTimeout(HttpdConnData *pConn) {
     //Unimplemented for FreeRTOS
 }
 
-#ifdef linux
+#ifdef LINUX
 //Set/clear global httpd lock.
 void ICACHE_FLASH_ATTR httpdPlatLock(HttpdInstance *pInstance) {
     HttpdFreertosInstance *pFR = fr_of_instance(pInstance);
@@ -165,7 +162,7 @@ static bool sslSetDerCertificateAndKey(HttpdFreertosInstance *pInstance,
     ESP_LOGI(TAG, "SSL server context setting ca certificate......");
     int ret = SSL_CTX_use_certificate_ASN1(pInstance->ctx, certificate_size, certificate);
     if (!ret) {
-#ifdef linux
+#ifdef LINUX
         ERR_print_errors_fp(stderr);
 #endif
         ESP_LOGE(TAG, "SSL_CTX_use_certificate_ASN1 %d", ret);
@@ -176,7 +173,7 @@ static bool sslSetDerCertificateAndKey(HttpdFreertosInstance *pInstance,
     ESP_LOGI(TAG, "SSL server context setting private key......");
     ret = SSL_CTX_use_RSAPrivateKey_ASN1(pInstance->ctx, private_key, private_key_size);
     if (!ret) {
-#ifdef linux
+#ifdef LINUX
         ERR_print_errors_fp(stderr);
 #endif
         ESP_LOGE(TAG, "SSL_CTX_use_RSAPrivateKey_ASN1 %d", ret);
@@ -188,18 +185,11 @@ static bool sslSetDerCertificateAndKey(HttpdFreertosInstance *pInstance,
 
 #endif
 
-#ifdef linux
-
+#ifdef LINUX
 #define PLAT_TASK_EXIT return NULL
-
 #else
-
 #define PLAT_TASK_EXIT vTaskDelete(NULL)
-
 #endif
-
-
-
 
 PLAT_RETURN platHttpServerTask(void *pvParameters)
 {
@@ -221,7 +211,7 @@ PLAT_RETURN platHttpServerTask(void *pvParameters)
 void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInstance) {
     ctx->pInstance = pInstance;
 
-#ifdef linux
+#ifdef LINUX
     pthread_mutex_init(&ctx->pInstance->httpdMux, NULL);
 #else
     ctx->pInstance->httpdMux = xSemaphoreCreateRecursiveMutex();
@@ -239,7 +229,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     memset(&udp_addr, 0, sizeof(udp_addr)); /* Zero out structure */
     udp_addr.sin_family = AF_INET;			/* Internet address family */
     udp_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    #ifndef linux
+    #ifndef CONFIG_LINUX
     udp_addr.sin_len = sizeof(udp_addr);
     #endif
 
@@ -254,7 +244,8 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     if(bind(ctx->udpListenFd, (struct sockaddr *)&udp_addr, sizeof(udp_addr)) != 0)
     {
         ESP_LOGE(TAG, "udp bind failure");
-        PLAT_TASK_EXIT;
+        ctx->shutdown = true;
+        return;
     }
     ESP_LOGI(TAG, "shutdown bound to udp port %d", ctx->pInstance->udpShutdownPort);
 #endif
@@ -264,7 +255,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     memset(&server_addr, 0, sizeof(server_addr)); /* Zero out structure */
     server_addr.sin_family = AF_INET;			/* Internet address family */
     server_addr.sin_addr.s_addr = ctx->pInstance->httpListenAddress.sin_addr.s_addr;
-#ifndef linux
+#ifndef LINUX
     server_addr.sin_len = sizeof(server_addr);
 #endif
     server_addr.sin_port = htons(ctx->pInstance->httpPort); /* Local port */
@@ -424,7 +415,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
                 ESP_LOGE(TAG, "SSL_new");
                 close(ctx->remoteFd);
                 pRconn->fd = -1;
-                continue;
+                return;
             }
             ESP_LOGD(TAG, "OK");
 
@@ -438,7 +429,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
                 close(ctx->remoteFd);
                 SSL_free(pRconn->ssl);
                 pRconn->fd = -1;
-                continue;
+                return;
             }
             ESP_LOGD(TAG, "OK");
         }
@@ -568,7 +559,7 @@ PLAT_RETURN platHttpServerTaskDeinit(ServerTaskContext *ctx) {
 }
 
 
-#ifdef linux
+#ifdef LINUX
 
 #include <signal.h>
 #include <time.h>
@@ -799,7 +790,7 @@ void ICACHE_FLASH_ATTR httpdFreertosSslAddClientCertificate(HttpdFreertosInstanc
                                           const void *certificate, size_t certificate_size)
 {
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
-    X509 *client_cacert = d2i_X509(NULL, certificate, certificate_size);
+    X509 *client_cacert = d2i_X509(NULL, (const unsigned char**)certificate, certificate_size);
     int rv = SSL_CTX_add_client_CA(pInstance->ctx, client_cacert);
     if(rv == 0)
     {
@@ -818,11 +809,11 @@ HttpdStartStatus ICACHE_FLASH_ATTR httpdFreertosStart(HttpdFreertosInstance *pIn
     }
 #endif
 
-#ifdef linux
+#ifdef LINUX
     pthread_t thread;
     pthread_create(&thread, NULL, platHttpServerTask, pInstance);
 #else
-#ifdef ESP32
+
 #ifndef CONFIG_ESPHTTPD_PROC_CORE
 #define CONFIG_ESPHTTPD_PROC_CORE   tskNO_AFFINITY
 #endif
@@ -830,9 +821,7 @@ HttpdStartStatus ICACHE_FLASH_ATTR httpdFreertosStart(HttpdFreertosInstance *pIn
 #define CONFIG_ESPHTTPD_PROC_PRI    4
 #endif
     xTaskCreatePinnedToCore(platHttpServerTask, (const char *)"esphttpd", HTTPD_STACKSIZE, pInstance, CONFIG_ESPHTTPD_PROC_PRI, NULL, CONFIG_ESPHTTPD_PROC_CORE);
-#else
-    xTaskCreate(platHttpServerTask, (const signed char *)"esphttpd", HTTPD_STACKSIZE, pInstance, 4, NULL);
-#endif
+
 #endif
 
     ESP_LOGI(TAG, "starting server on port port %d, maxConnections %d, mode %s",
@@ -858,7 +847,7 @@ void httpdPlatShutdown(HttpdInstance *pInstance)
     memset(&udp_addr, 0, sizeof(udp_addr)); /* Zero out structure */
     udp_addr.sin_family = AF_INET;			/* Internet address family */
     udp_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-#ifndef linux
+#ifndef LINUX
     udp_addr.sin_len = sizeof(udp_addr);
 #endif
     udp_addr.sin_port = htons(pFR->udpShutdownPort);
@@ -890,6 +879,4 @@ void httpdPlatShutdown(HttpdInstance *pInstance)
 
     close(s);
 }
-#endif
-
 #endif

@@ -19,38 +19,20 @@ typedef int32_t int32;
 
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef linux
-
-#ifdef FREERTOS
-#include <stdint.h>
-#ifdef ESP32
-#include "esp_types.h"
-#include "esp_attr.h"
-#include "esp_spi_flash.h"
-#else
-#include <espressif/esp_common.h>
+#if defined(ESP_PLATFORM)
+# include "esp_attr.h"
+# include "esp_log.h"
+# include "esp_types.h"
+# if defined(CONFIG_IDF_TARGET_ESP32) || \
+     defined(CONFIG_IDF_TARGET_ESP32S2) || \
+     defined(CONFIG_IDF_TARGET_ESP32S3)
+#  include "esp_spi_flash.h"
+# endif
 #endif
-
-#else
-#include <c_types.h>
-#include <ip_addr.h>
-#include <espconn.h>
-#include <ets_sys.h>
-#include <gpio.h>
-#include <mem.h>
-#include <osapi.h>
-#include <user_interface.h>
-#include <upgrade.h>
-#endif
-
-#endif // #ifndef linux
 
 #include "platform.h"
-
-#ifndef linux
-#include "espmissingincludes.h"
-#endif

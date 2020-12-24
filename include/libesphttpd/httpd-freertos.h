@@ -12,17 +12,17 @@
 
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
 #include <openssl/ssl.h>
-#ifdef linux
+#ifdef CONFIG_LINUX
 #include <openssl/err.h>
 #endif
 #endif
 
-#ifdef linux
+#ifdef CONFIG_LINUX
 #include <netinet/in.h>
 #endif
 
 
-#ifdef linux
+#ifdef CONFIG_LINUX
     #define PLAT_RETURN void*
 #else
     #define PLAT_RETURN void

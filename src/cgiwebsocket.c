@@ -6,7 +6,7 @@
 Websocket support for esphttpd. Inspired by https://github.com/dangrie158/ESP-8266-WebSocket
 */
 
-#ifdef linux
+#ifdef LINUX
 #include <libesphttpd/linux.h>
 #else
 #include <libesphttpd/esp.h>
@@ -162,7 +162,6 @@ void ICACHE_FLASH_ATTR cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, 
 
 
 static void ICACHE_FLASH_ATTR websockFree(Websock *ws) {
-	ESP_LOGD(TAG, "");
 	if (ws->closeCb) ws->closeCb(ws);
 	//Clean up linked list
 	if (llStart==ws) {

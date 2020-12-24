@@ -128,7 +128,11 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 		if (file != NULL) {
 			struct stat st = {};
 			fstat(fileno(file), &st);
+#if defined(LINUX)
+			isGzip = 0;
+#else
 			isGzip = (st.st_spare4[0] == ESPFS_MAGIC && st.st_spare4[1] & ESPFS_FLAG_GZIP);
+#endif
 			ESP_LOGD(__func__, "fopen: %s, r", filename);
 		}
 		
@@ -208,7 +212,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 	if (len!=FILE_CHUNK_LEN) {
 		//We're done.
 		fclose(file);
-		ESP_LOGD(__func__, "fclose: %s, r", filename);
+		ESP_LOGD(__func__, "fclose");
 
 		return HTTPD_CGI_DONE;
 	} else {
@@ -252,10 +256,12 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsTemplate(HttpdConnData *connData) {
 			return HTTPD_CGI_NOTFOUND;
 		}
 
+#if !defined(LINUX)
 		if (s.st_spare4[0] == ESPFS_MAGIC && s.st_spare4[1] & ESPFS_FLAG_GZIP) {
 			ESP_LOGE(__func__, "Trying to use gzip-compressed file %s as template!", connData->url);
 			return HTTPD_CGI_NOTFOUND;
 		}
+#endif
 
 		getFilepath(connData, filename, sizeof(filename));
 

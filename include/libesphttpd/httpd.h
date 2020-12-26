@@ -1,5 +1,4 @@
-#ifndef HTTPD_H
-#define HTTPD_H
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -237,6 +236,4 @@ void httpdShutdown(HttpdInstance *pInstance);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

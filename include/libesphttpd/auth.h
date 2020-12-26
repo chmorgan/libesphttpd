@@ -1,5 +1,4 @@
-#ifndef AUTH_H
-#define AUTH_H
+#pragma once
 
 #include "httpd.h"
 
@@ -18,5 +17,3 @@
 typedef int (* AuthGetUserPw)(HttpdConnData *connData, int no, char *user, int userLen, char *pass, int passLen);
 
 CgiStatus authBasic(HttpdConnData *connData);
-
-#endif

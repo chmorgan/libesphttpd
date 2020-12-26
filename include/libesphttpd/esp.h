@@ -1,3 +1,5 @@
+#pragma once
+
 // Combined include file for esp8266 and esp32
 
 #ifdef ESP_PLATFORM //only set in esp-idf
@@ -14,7 +16,6 @@ typedef int8_t int8;
 typedef int16_t int16;
 typedef int32_t int32;
 
-#define ICACHE_RODATA_ATTR
 #endif
 
 

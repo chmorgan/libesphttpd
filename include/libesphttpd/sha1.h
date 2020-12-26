@@ -1,7 +1,4 @@
-/* header */
-
-#ifndef __SHA1_H__
-#define __SHA1_H__
+#pragma once
 
 #define HASH_LENGTH 20
 #define BLOCK_LENGTH 64
@@ -35,5 +32,3 @@ void sha1_initHmac(sha1nfo *s, const uint8_t* key, int keyLength);
 /**
  */
 uint8_t* sha1_resultHmac(sha1nfo *s);
-
-#endif

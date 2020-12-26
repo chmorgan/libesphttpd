@@ -1,5 +1,4 @@
-#ifndef HTTPD_PLATFORM_H
-#define HTTPD_PLATFORM_H
+#pragma once
 
 #include "libesphttpd/platform.h"
 
@@ -21,6 +20,4 @@ void httpdPlatTimerDelete(HttpdPlatTimerHandle timer);
 
 #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
 void httpdPlatShutdown(HttpdInstance *pInstance);
-#endif
-
 #endif

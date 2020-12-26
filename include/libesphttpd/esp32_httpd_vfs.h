@@ -1,5 +1,4 @@
-#ifndef ESP32_HTTPD_VFS_H
-#define ESP32_HTTPD_VFS_H
+#pragma once
 
 #include "httpd.h"
 
@@ -38,5 +37,3 @@ CgiStatus cgiEspVfsGet(HttpdConnData *connData);
 //           - Allows only replacing content of one file at "/base/directory/writeable_file.txt".
 //           - example: POST or PUT http://1.2.3.4/writeable_file.txt
 CgiStatus cgiEspVfsUpload(HttpdConnData *connData);
-
-#endif //ESP32_HTTPD_VFS_H

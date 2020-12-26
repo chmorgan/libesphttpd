@@ -1,5 +1,4 @@
-#ifndef CGIFLASH_H
-#define CGIFLASH_H
+#pragma once
 
 #include "httpd.h"
 
@@ -20,5 +19,3 @@ CgiStatus cgiRebootFirmware(HttpdConnData *connData);
 CgiStatus cgiSetBoot(HttpdConnData *connData);
 CgiStatus cgiEraseFlash(HttpdConnData *connData);
 CgiStatus cgiGetFlashInfo(HttpdConnData *connData);
-
-#endif

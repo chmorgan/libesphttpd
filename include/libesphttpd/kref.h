@@ -1,5 +1,4 @@
-#ifndef _KREF_H_
-#define _KREF_H_
+#pragma once
 
 #include <stdint.h>
 #include <stdatomic.h>
@@ -52,5 +51,3 @@ static inline int kref_put(struct kref *kref, void (*release)(struct kref *kref)
 
     return result;
 }
-
-#endif /* _KREF_H_ */

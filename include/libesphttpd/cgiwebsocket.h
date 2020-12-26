@@ -1,5 +1,4 @@
-#ifndef CGIWEBSOCKET_H
-#define CGIWEBSOCKET_H
+#pragma once
 
 #include "httpd.h"
 
@@ -39,6 +38,4 @@ int cgiWebsockBroadcast(HttpdInstance *pInstance, const char *resource, char *da
 
 #ifdef __cplusplus
 } /* extern "C" */
-#endif
-
 #endif

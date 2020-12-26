@@ -1,5 +1,4 @@
-#ifndef CGIWIFI_H
-#define CGIWIFI_H
+#pragma once
 
 #include "httpd.h"
 
@@ -16,7 +15,4 @@ CgiStatus cgiWiFiConnStatus(HttpdConnData *connData);
 esp_err_t initCgiWifi(void);
 void cgiWifiEventCb(system_event_t *event);
 CgiStatus cgiWiFiStartWps(HttpdConnData *connData);
-#endif
-
-
 #endif

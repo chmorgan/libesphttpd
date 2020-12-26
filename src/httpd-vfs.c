@@ -24,7 +24,7 @@ Connector to let httpd use the vfs filesystem to serve the files in it.
 
 
 #define FILE_CHUNK_LEN    (1024)
-#define MAX_FILENAME_LENGTH (1024)
+#define MAX_FILENAME_LENGTH (256)
 
 #define ESPFS_MAGIC (0x73665345)
 #define ESPFS_FLAG_GZIP (1<<1)

@@ -29,6 +29,8 @@ static inline void kref_get(struct kref *kref)
 
     old = atomic_fetch_add(&(kref->count), 1);
     configASSERT(old >= 1);
+
+    (void) old;
 }
 
 static inline int kref_put(struct kref *kref, void (*release)(struct kref *kref))

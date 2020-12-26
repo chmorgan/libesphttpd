@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-=======
 set(LINUX true)
 
->>>>>>> reworked for latest libesphttpd
 include("${CMAKE_SOURCE_DIR}/cmake/vars.cmake")
 
 add_library(libesphttpd STATIC ${libesphttpd_SRCS})

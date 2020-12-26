@@ -35,6 +35,11 @@ typedef HttpdPlatTimer* HttpdPlatTimerHandle;
 
 #include "libesphttpd/httpd.h"
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @return number of bytes that were written
  */
@@ -53,4 +58,8 @@ void httpdPlatTimerDelete(HttpdPlatTimerHandle timer);
 
 #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
 void httpdPlatShutdown(HttpdInstance *pInstance);
+#endif
+
+#ifdef __cplusplus
+} /* extern "C" */
 #endif

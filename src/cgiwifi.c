@@ -22,7 +22,8 @@ ESP32 Cgi/template routines for the /wifi url.
 #include <esp_log.h>
 
 #include "libesphttpd/cgi.h"
-#include "libesphttpd/kref.h"
+
+#include "kref.h"
 
 
 static const char *TAG = "cgiwifi";

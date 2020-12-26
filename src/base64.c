@@ -31,24 +31,8 @@ static const int base64dec_tab[256]={
 	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 };
 
-#if 0
-static int base64decode(const char in[4], char out[3]) {
-	uint8_t v[4];
-
-	v[0]=base64dec_tab[(unsigned)in[0]];
-	v[1]=base64dec_tab[(unsigned)in[1]];
-	v[2]=base64dec_tab[(unsigned)in[2]];
-	v[3]=base64dec_tab[(unsigned)in[3]];
-
-	out[0]=(v[0]<<2)|(v[1]>>4);
-	out[1]=(v[1]<<4)|(v[2]>>2);
-	out[2]=(v[2]<<6)|(v[3]);
-	return (v[0]|v[1]|v[2]|v[3])!=255 ? in[3]=='=' ? in[2]=='=' ? 1 : 2 : 3 : 0;
-}
-#endif
-
 /* decode a base64 string in one shot */
-int  __attribute__((weak)) libesphttpd_base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
+int  __attribute__((weak)) base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
 	unsigned int ii, io;
 	uint32_t v;
 	unsigned int rem;
@@ -77,16 +61,7 @@ int  __attribute__((weak)) libesphttpd_base64_decode(size_t in_len, const char *
 
 static const uint8_t base64enc_tab[64]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-#if 0
-void base64encode(const unsigned char in[3], unsigned char out[4], int count) {
-	out[0]=base64enc_tab[(in[0]>>2)];
-	out[1]=base64enc_tab[((in[0]&3)<<4)|(in[1]>>4)];
-	out[2]=count<2 ? '=' : base64enc_tab[((in[1]&15)<<2)|(in[2]>>6)];
-	out[3]=count<3 ? '=' : base64enc_tab[(in[2]&63)];
-}
-#endif
-
-int __attribute__((weak)) libesphttpd_base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
+int __attribute__((weak)) base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
 	unsigned ii, io;
 	uint32_t v;
 	unsigned rem;

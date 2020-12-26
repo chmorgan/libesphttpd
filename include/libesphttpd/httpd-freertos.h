@@ -6,14 +6,14 @@
 # include <lwip/sockets.h>
 #endif
 
-#include "libesphttpd/platform.h"
-
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
 # include <openssl/ssl.h>
 # ifdef LINUX
 #  include <openssl/err.h>
 # endif
 #endif
+
+#include "libesphttpd/platform.h"
 
 
 #ifdef LINUX

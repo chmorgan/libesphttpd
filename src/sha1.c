@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "libesphttpd/sha1.h"
+#include "sha1.h"
 
 
 //according to http://ip.cadence.com/uploads/pdf/xtensalx_overview_handbook.pdf

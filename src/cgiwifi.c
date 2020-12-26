@@ -6,10 +6,9 @@
 ESP32 Cgi/template routines for the /wifi url.
  */
 
-#include <libesphttpd/esp.h>
-#include <libesphttpd/cgiwifi.h>
-
 #include <stdatomic.h>
+#include <stdint.h>
+#include <string.h>
 #include <errno.h>
 
 #include <freertos/FreeRTOS.h>
@@ -22,7 +21,9 @@ ESP32 Cgi/template routines for the /wifi url.
 #include <esp_wps.h>
 #include <esp_log.h>
 
-#include <libesphttpd/kref.h>
+#include "libesphttpd/cgi.h"
+#include "libesphttpd/kref.h"
+
 
 static const char *TAG = "cgiwifi";
 /* Enable this to disallow any changes in AP settings. */
@@ -1223,7 +1224,7 @@ CgiStatus cgiWiFiAPSettings(HttpdConnData *connData)
 
         if (has_arg_chan) {
             ESP_LOGI(TAG, "[%s] Setting ch=%d", __FUNCTION__, chan);
-            cfg.ap.ap.channel = (uint8) chan;
+            cfg.ap.ap.channel = (uint8_t) chan;
         }
 
         if (has_arg_ssid) {

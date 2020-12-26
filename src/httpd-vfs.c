@@ -5,21 +5,23 @@
 /*
 Connector to let httpd use the vfs filesystem to serve the files in it.
 */
-#ifdef linux
-#include <libesphttpd/linux.h>
-#else
-#include <libesphttpd/esp.h>
-#endif
 
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/unistd.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
-#include "esp_log.h"
-#include "libesphttpd/httpd.h"
-#include "httpd-platform.h"
+
 #ifndef LINUX
-# include "cJSON.h"
+# include <cJSON.h>
 #endif
+#include <esp_log.h>
+
+#include "libesphttpd/httpd.h"
+#include "libesphttpd/platform.h"
+
 
 #define FILE_CHUNK_LEN    (1024)
 #define MAX_FILENAME_LENGTH (1024)
@@ -424,7 +426,7 @@ typedef struct {
 } UploadState;
 
 #ifndef LINUX
-CgiStatus   cgiEspVfsUpload(HttpdConnData *connData) {
+CgiStatus cgiEspVfsUpload(HttpdConnData *connData) {
 	UploadState *state=(UploadState *)connData->cgiData;
     
 	if (connData->isConnectionClosed) {

@@ -10,18 +10,19 @@ be used to send mobile phones, tablets etc which connect to the ESP in AP mode d
 the internal webserver.
 */
 
-#include <libesphttpd/esp.h>
-#include "esp_log.h"
+#include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
-#include "tcpip_adapter.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
 
-#include "lwip/sockets.h"
-#include "lwip/err.h"
+#include <esp_log.h>
+#include <lwip/sockets.h>
+#include <lwip/err.h>
+#include <tcpip_adapter.h>
+
+
 static int sockFd;
-
 
 #define DNS_LEN 512
 
@@ -259,13 +260,13 @@ static void captdnsRecv(struct sockaddr_in *premote_addr, char *pusrdata, unsign
 		}
 	}
 	//Send the response
-	sendto(sockFd,(uint8*)reply, rend-reply, 0, (struct sockaddr *)premote_addr, sizeof(struct sockaddr_in));
+	sendto(sockFd,(uint8_t*)reply, rend-reply, 0, (struct sockaddr *)premote_addr, sizeof(struct sockaddr_in));
 }
 
 char udp_msg[DNS_LEN];
 static void captdnsTask(void *pvParameters) {
 	struct sockaddr_in server_addr;
-	int32 ret;
+	int32_t ret;
 	struct sockaddr_in from;
 	socklen_t fromlen;
     tcpip_adapter_ip_info_t ipconfig;
@@ -306,9 +307,5 @@ static void captdnsTask(void *pvParameters) {
 }
 
 void captdnsInit(void) {
-#ifdef ESP32
 	xTaskCreate(captdnsTask, (const char *)"captdns_task", 3000, NULL, 3, NULL);
-#else
-	xTaskCreate(captdnsTask, (const signed char *)"captdns_task", 1200, NULL, 3, NULL);
-#endif
 }

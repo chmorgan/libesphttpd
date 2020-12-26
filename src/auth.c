@@ -6,16 +6,24 @@
 HTTP auth implementation. Only does basic authentication for now.
 */
 
-#ifdef linux
-#include <libesphttpd/linux.h>
-#else
-#include <libesphttpd/esp.h>
+#include <string.h>
+
+#include "base64.h"
+#include "libesphttpd/cgi.h"
+#include "libesphttpd/httpd.h"
+
+
+#ifndef HTTP_AUTH_REALM
+#define HTTP_AUTH_REALM "Protected"
 #endif
 
-#include "libesphttpd/auth.h"
-#include "libesphttpd_base64.h"
+#define HTTPD_AUTH_SINGLE 0
+#define HTTPD_AUTH_CALLBACK 1
 
-CgiStatus authBasic(HttpdConnData *connData) {
+#define AUTH_MAX_USER_LEN 32
+#define AUTH_MAX_PASS_LEN 32
+
+CgiStatus cgiAuthBasic(HttpdConnData *connData) {
 	const char *unauthorized = "401 Unauthorized.";
 	int no=0;
 	int r;

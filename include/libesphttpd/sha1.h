@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdint.h>
+
+
 #define HASH_LENGTH 20
 #define BLOCK_LENGTH 64
 

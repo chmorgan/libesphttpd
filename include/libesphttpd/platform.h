@@ -1,34 +1,24 @@
 #pragma once
 
 #ifndef LINUX
+# include <freertos/FreeRTOS.h>
+# include <freertos/timers.h>
 
-#include <libesphttpd/esp.h>
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/timers.h"
-
-//#include "esp_timer.h"
 typedef struct RtosConnType RtosConnType;
 typedef RtosConnType* ConnTypePtr;
-
-#ifdef ESP32
-// freertos v8 api
 typedef TimerHandle_t HttpdPlatTimerHandle;
-#else
-// freertos v7 api
-typedef xTimerHandle HttpdPlatTimerHandle;
-#endif
 
 #else
+# include <unistd.h>
+# include <stdbool.h>
+# include <sys/types.h>
 
-#include <unistd.h>
-#include <stdbool.h>
 typedef struct RtosConnType RtosConnType;
 typedef RtosConnType* ConnTypePtr;
 
-#define vTaskDelay(milliseconds) usleep((milliseconds) * 1000)
-#define portTICK_RATE_MS 1
-#define portTICK_PERIOD_MS 1
+# define vTaskDelay(milliseconds) usleep((milliseconds) * 1000)
+# define portTICK_RATE_MS 1
+# define portTICK_PERIOD_MS 1
 
 typedef struct
 {
@@ -41,4 +31,26 @@ typedef struct
 
 typedef HttpdPlatTimer* HttpdPlatTimerHandle;
 
+#endif
+
+#include "libesphttpd/httpd.h"
+
+/**
+ * @return number of bytes that were written
+ */
+int httpdPlatSendData(HttpdInstance *pInstance, HttpdConnData *pConn, char *buff, int len);
+
+void httpdPlatDisconnect(HttpdConnData *ponn);
+void httpdPlatDisableTimeout(HttpdConnData *pConn);
+
+void httpdPlatLock(HttpdInstance *pInstance);
+void httpdPlatUnlock(HttpdInstance *pInstance);
+
+HttpdPlatTimerHandle httpdPlatTimerCreate(const char *name, int periodMs, int autoreload, void (*callback)(void *arg), void *ctx);
+void httpdPlatTimerStart(HttpdPlatTimerHandle timer);
+void httpdPlatTimerStop(HttpdPlatTimerHandle timer);
+void httpdPlatTimerDelete(HttpdPlatTimerHandle timer);
+
+#ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
+void httpdPlatShutdown(HttpdInstance *pInstance);
 #endif

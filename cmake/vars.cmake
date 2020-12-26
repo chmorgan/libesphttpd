@@ -5,7 +5,7 @@ set(libesphttpd_SRCS
   src/httpd-freertos.c
   src/httpd-vfs.c
   src/httpd.c
-  src/libesphttpd_base64.c
+  src/base64.c
   src/sha1.c)
 set(libesphttpd_INCLUDE_DIRS
   include)

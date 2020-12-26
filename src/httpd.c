@@ -9,19 +9,16 @@ Http server - core routines
 /* Copyright 2017 Jeroen Domburg <git@j0h.nl> */
 /* Copyright 2017 Chris Morgan <chmorgan@gmail.com> */
 
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#ifdef linux
-#include <libesphttpd/linux.h>
-#else
-#include <libesphttpd/esp.h>
-#endif
-
-#include <strings.h>
+#include <esp_log.h>
 
 #include "libesphttpd/httpd.h"
-#include "httpd-platform.h"
+#include "libesphttpd/platform.h"
 
-#include "esp_log.h"
 
 //Flags
 #define HFL_HTTP11 (1<<0)

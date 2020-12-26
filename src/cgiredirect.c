@@ -1,7 +1,13 @@
-#include <libesphttpd/esp.h>
-#include <libesphttpd/cgiredirect.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "esp_log.h"
+#include <esp_log.h>
+#ifndef LINUX
+# include <esp_netif.h>
+#endif
+
+#include "libesphttpd/cgi.h"
 
 
 //Use this as a cgi function to redirect one url to another.
@@ -63,29 +69,10 @@ CgiStatus cgiRedirectToHostname(HttpdConnData *connData) {
 	return HTTPD_CGI_DONE;
 }
 
-
 //Same as above, but will only redirect clients with an IP that is in the range of
 //the SoftAP interface. This should preclude clients connected to the STA interface
 //to be redirected to nowhere.
 CgiStatus cgiRedirectApClientToHostname(HttpdConnData *connData) {
-#ifdef linux
+	/* TODO: Implement this */
 	return HTTPD_CGI_NOTFOUND;
-#else
-#ifndef FREERTOS
-	uint32 *remadr;
-	struct ip_info apip;
-	int x=wifi_get_opmode();
-	//Check if we have an softap interface; bail out if not
-	if (x!=2 && x!=3) return HTTPD_CGI_NOTFOUND;
-	remadr=(uint32 *)connData->remote_ip;
-	wifi_get_ip_info(SOFTAP_IF, &apip);
-	if ((*remadr & apip.netmask.addr) == (apip.ip.addr & apip.netmask.addr)) {
-		return cgiRedirectToHostname(connData);
-	} else {
-		return HTTPD_CGI_NOTFOUND;
-	}
-#else
-	return HTTPD_CGI_NOTFOUND;
-#endif
-#endif
 }

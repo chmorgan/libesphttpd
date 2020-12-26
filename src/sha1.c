@@ -7,23 +7,16 @@
  */
 // gcc -Wall -DSHA1TEST -o sha1test sha1.c && ./sha1test
 
-#ifdef linux
-#include <libesphttpd/linux.h>
-#else
-#include <libesphttpd/esp.h>
-#endif
-
 #include <stdint.h>
 #include <string.h>
 
 #include "libesphttpd/sha1.h"
 
+
 //according to http://ip.cadence.com/uploads/pdf/xtensalx_overview_handbook.pdf
 // the cpu is normally defined as little ending, but can be big endian too.
 // for the esp this seems to work
 //#define SHA_BIG_ENDIAN
-
-
 
 /* code */
 #define SHA1_K0  0x5a827999
@@ -31,7 +24,7 @@
 #define SHA1_K40 0x8f1bbcdc
 #define SHA1_K60 0xca62c1d6
 
-void ICACHE_FLASH_ATTR sha1_init(sha1nfo *s) {
+void sha1_init(sha1nfo *s) {
 	s->state[0] = 0x67452301;
 	s->state[1] = 0xefcdab89;
 	s->state[2] = 0x98badcfe;
@@ -41,11 +34,11 @@ void ICACHE_FLASH_ATTR sha1_init(sha1nfo *s) {
 	s->bufferOffset = 0;
 }
 
-uint32_t ICACHE_FLASH_ATTR sha1_rol32(uint32_t number, uint8_t bits) {
+uint32_t sha1_rol32(uint32_t number, uint8_t bits) {
 	return ((number << bits) | (number >> (32-bits)));
 }
 
-void ICACHE_FLASH_ATTR sha1_hashBlock(sha1nfo *s) {
+void sha1_hashBlock(sha1nfo *s) {
 	uint8_t i;
 	uint32_t a,b,c,d,e,t;
 
@@ -82,7 +75,7 @@ void ICACHE_FLASH_ATTR sha1_hashBlock(sha1nfo *s) {
 	s->state[4] += e;
 }
 
-void ICACHE_FLASH_ATTR sha1_addUncounted(sha1nfo *s, uint8_t data) {
+void sha1_addUncounted(sha1nfo *s, uint8_t data) {
 	uint8_t * const b = (uint8_t*) s->buffer;
 #ifdef SHA_BIG_ENDIAN
 	b[s->bufferOffset] = data;
@@ -96,16 +89,16 @@ void ICACHE_FLASH_ATTR sha1_addUncounted(sha1nfo *s, uint8_t data) {
 	}
 }
 
-void ICACHE_FLASH_ATTR sha1_writebyte(sha1nfo *s, uint8_t data) {
+void sha1_writebyte(sha1nfo *s, uint8_t data) {
 	++s->byteCount;
 	sha1_addUncounted(s, data);
 }
 
-void ICACHE_FLASH_ATTR sha1_write(sha1nfo *s, const char *data, size_t len) {
+void sha1_write(sha1nfo *s, const char *data, size_t len) {
 	for (;len--;) sha1_writebyte(s, (uint8_t) *data++);
 }
 
-void ICACHE_FLASH_ATTR sha1_pad(sha1nfo *s) {
+void sha1_pad(sha1nfo *s) {
 	// Implement SHA-1 padding (fips180-2 Â§5.1.1)
 
 	// Pad with 0x80 followed by 0x00 until the end of the block
@@ -123,7 +116,7 @@ void ICACHE_FLASH_ATTR sha1_pad(sha1nfo *s) {
 	sha1_addUncounted(s, s->byteCount << 3);
 }
 
-uint8_t* ICACHE_FLASH_ATTR sha1_result(sha1nfo *s) {
+uint8_t* sha1_result(sha1nfo *s) {
 	// Pad to complete the last block
 	sha1_pad(s);
 
@@ -146,7 +139,7 @@ uint8_t* ICACHE_FLASH_ATTR sha1_result(sha1nfo *s) {
 #define HMAC_IPAD 0x36
 #define HMAC_OPAD 0x5c
 
-void ICACHE_FLASH_ATTR sha1_initHmac(sha1nfo *s, const uint8_t* key, int keyLength) {
+void sha1_initHmac(sha1nfo *s, const uint8_t* key, int keyLength) {
 	uint8_t i;
 	memset(s->keyBuffer, 0, BLOCK_LENGTH);
 	if (keyLength > BLOCK_LENGTH) {
@@ -165,7 +158,7 @@ void ICACHE_FLASH_ATTR sha1_initHmac(sha1nfo *s, const uint8_t* key, int keyLeng
 	}
 }
 
-uint8_t* ICACHE_FLASH_ATTR sha1_resultHmac(sha1nfo *s) {
+uint8_t* sha1_resultHmac(sha1nfo *s) {
 	uint8_t i;
 	// Complete inner hash
 	memcpy(s->innerHash,sha1_result(s),HASH_LENGTH);

@@ -1,31 +1,25 @@
 #pragma once
 
-#include "httpd.h"
-
-#ifdef FREERTOS
-#ifdef ESP32
-#include "lwip/sockets.h"
+#ifdef LINUX
+# include <netinet/in.h>
 #else
-#include "lwip/lwip/sockets.h"
+# include <lwip/sockets.h>
 #endif
-#endif // #ifdef FREERTOS
+
+#include "libesphttpd/platform.h"
 
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
-#include <openssl/ssl.h>
-#ifdef CONFIG_LINUX
-#include <openssl/err.h>
-#endif
-#endif
-
-#ifdef CONFIG_LINUX
-#include <netinet/in.h>
+# include <openssl/ssl.h>
+# ifdef LINUX
+#  include <openssl/err.h>
+# endif
 #endif
 
 
-#ifdef CONFIG_LINUX
-    #define PLAT_RETURN void*
+#ifdef LINUX
+# define PLAT_RETURN void*
 #else
-    #define PLAT_RETURN void
+# define PLAT_RETURN void
 #endif
 
 #ifdef __cplusplus
@@ -84,9 +78,9 @@ typedef struct {
     char serverStr[20];
     struct timeval *selectTimeoutData;
     HttpdFreertosInstance *pInstance;
-    int32 listenFd;
-    int32 udpListenFd;
-    int32 remoteFd;
+    int32_t listenFd;
+    int32_t udpListenFd;
+    int32_t remoteFd;
 } ServerTaskContext;
 
 /**

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <stdint.h>
 #include <stdatomic.h>
+#include <stddef.h>
+
 
 #if !defined(koffsetof)
 #define koffsetof(type, member) ((size_t) &((type *)0)->member)

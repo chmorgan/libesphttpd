@@ -4,11 +4,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "esp.h"
 
 /**
  * Design notes:

@@ -12,29 +12,28 @@ Thanks to my collague at Espressif for writing the foundations of this code.
 /* Copyright 2017 Jeroen Domburg <git@j0h.nl> */
 /* Copyright 2017 Chris Morgan <chmorgan@gmail.com> */
 
-#ifdef LINUX
-#include <libesphttpd/linux.h>
-#include <netinet/tcp.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifdef LINUX
+# include <pthread.h>
 #else
-#include <libesphttpd/esp.h>
+# include <freertos/FreeRTOS.h>
+# include <freertos/task.h>
+# include <freertos/queue.h>
+# include <freertos/semphr.h>
+
+# include <lwip/sockets.h>
 #endif
+#include <esp_log.h>
 
 #include "libesphttpd/httpd.h"
 #include "libesphttpd/platform.h"
-#include "httpd-platform.h"
 #include "libesphttpd/httpd-freertos.h"
 
-#include "esp_log.h"
-
-#ifndef LINUX
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
-#include "freertos/semphr.h"
-#endif
 
 #define fr_of_instance(instance) esp_container_of(instance, HttpdFreertosInstance, httpdInstance)
 #define frconn_of_conn(conn) esp_container_of(conn, RtosConnType, connData)
@@ -226,7 +225,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     memset(&udp_addr, 0, sizeof(udp_addr)); /* Zero out structure */
     udp_addr.sin_family = AF_INET;			/* Internet address family */
     udp_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    #ifndef CONFIG_LINUX
+    #ifndef LINUX
     udp_addr.sin_len = sizeof(udp_addr);
     #endif
 
@@ -279,7 +278,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
 #endif
 
     /* Bind to the local port */
-    int32 retBind = 0;
+    int32_t retBind = 0;
     do{
         retBind = bind(ctx->listenFd, (struct sockaddr *)&server_addr, sizeof(server_addr));
         if (retBind != 0) {
@@ -289,7 +288,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
         }
     } while(retBind != 0);
 
-    int32 retListen = 0;
+    int32_t retListen = 0;
     do{
         /* Listen to the local connection */
         retListen = listen(ctx->listenFd, ctx->pInstance->httpdInstance.maxConnections);
@@ -354,7 +353,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
 
     //polling all exist client handle,wait until readable/writable
     
-    int32 retSelect = select(maxfdp+1, &readset, &writeset, NULL, ctx->selectTimeoutData);
+    int32_t retSelect = select(maxfdp+1, &readset, &writeset, NULL, ctx->selectTimeoutData);
     ESP_LOGD(__func__, "select retSelect");
     if(retSelect <= 0) { return; }
 #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
@@ -366,7 +365,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
 
     //See if we need to accept a new connection
     if (FD_ISSET(ctx->listenFd, &readset)) {
-        int32 len = sizeof(struct sockaddr_in);
+        int32_t len = sizeof(struct sockaddr_in);
         struct sockaddr_in remote_addr;
         ctx->remoteFd = accept(ctx->listenFd, (struct sockaddr *)&remote_addr, (socklen_t *)&len);
         if (ctx->remoteFd<0) {
@@ -419,7 +418,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
             SSL_set_fd(pRconn->ssl, pRconn->fd);
 
             ESP_LOGD(__func__, "SSL server accept client .....");
-            int32 retAcceptSSL = SSL_accept(pRconn->ssl);
+            int32_t retAcceptSSL = SSL_accept(pRconn->ssl);
             if (!retAcceptSSL) {
                 int ssl_error = SSL_get_error(pRconn->ssl, retAcceptSSL);
                 ESP_LOGE(__func__, "SSL_accept %d", ssl_error);
@@ -479,7 +478,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
                 // re-read approach resolves an issue where data is stuck in
                 // SSL internal buffers
                 do {
-                    int32 retReadSSL = SSL_read(pRconn->ssl, &ctx->pInstance->precvbuf, RECV_BUF_SIZE - 1);
+                    int32_t retReadSSL = SSL_read(pRconn->ssl, &ctx->pInstance->precvbuf, RECV_BUF_SIZE - 1);
 
                     bytesStillAvailable = SSL_has_pending(pRconn->ssl);
 
@@ -509,7 +508,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
             } else
             {
 #endif
-                int32 retRecv = recv(pRconn->fd, &ctx->pInstance->precvbuf[0], RECV_BUF_SIZE, 0);
+                int32_t retRecv = recv(pRconn->fd, &ctx->pInstance->precvbuf[0], RECV_BUF_SIZE, 0);
 
                 if (retRecv > 0) {
                     //Data received. Pass to httpd.
@@ -642,11 +641,7 @@ void httpdPlatTimerDelete(HttpdPlatTimerHandle handle)
 HttpdPlatTimerHandle httpdPlatTimerCreate(const char *name, int periodMs, int autoreload, void (*callback)(void *arg), void *ctx)
 {
     HttpdPlatTimerHandle ret;
-#ifdef ESP32
     ret=xTimerCreate(name, pdMS_TO_TICKS(periodMs), autoreload?pdTRUE:pdFALSE, ctx, callback);
-#else
-    ret=xTimerCreate((const signed char * const)name, (periodMs / portTICK_PERIOD_MS), autoreload?pdTRUE:pdFALSE, ctx, callback);
-#endif
     return ret;
 }
 
@@ -817,7 +812,7 @@ HttpdStartStatus httpdFreertosStart(HttpdFreertosInstance *pInstance)
 #ifndef CONFIG_ESPHTTPD_PROC_PRI
 #define CONFIG_ESPHTTPD_PROC_PRI    4
 #endif
-    xTaskCreatePinnedToCore(platHttpServerTask, (const char *)"esphttpd", HTTPD_STACKSIZE, pInstance, CONFIG_ESPHTTPD_PROC_PRI, NULL, CONFIG_ESPHTTPD_PROC_CORE);
+    xTaskCreatePinnedToCore(platHttpServerTask, (const char *)"esphttpd", CONFIG_ESPHTTPD_STACK_SIZE, pInstance, CONFIG_ESPHTTPD_PROC_PRI, NULL, CONFIG_ESPHTTPD_PROC_CORE);
 
 #endif
 

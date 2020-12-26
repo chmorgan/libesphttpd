@@ -7,16 +7,19 @@ Routines for handling the (slightly more complicated) esp32 flash.
 Broken out because esp-idf is expected to get better routines for this.
 */
 
-#include <libesphttpd/esp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "rom/cache.h"
-#include "rom/ets_sys.h"
-#include "rom/spi_flash.h"
-#include "rom/crc.h"
-#include "rom/rtc.h"
-#include "esp_partition.h"
+
+#include <esp_partition.h>
+#include <rom/cache.h>
+#include <rom/ets_sys.h>
+#include <rom/spi_flash.h>
+#include <rom/crc.h>
+#include <rom/rtc.h>
+
+#include "esp32_flash.h"
+
 
 /*   Size of 32 bytes is friendly to flash encryption */
 typedef struct {

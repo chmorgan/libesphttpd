@@ -4,13 +4,13 @@
 
 /* base64.c : base-64 / MIME encode/decode */
 /* PUBLIC DOMAIN - Jon Mayo - November 13, 2003 */
-#ifdef linux
-#include <libesphttpd/linux.h>
-#else
-#include <libesphttpd/esp.h>
-#endif
 
-#include "libesphttpd_base64.h"
+#include <ctype.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "base64.h"
+
 
 static const int base64dec_tab[256]={
 	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,

@@ -40,10 +40,7 @@ Thanks to my collague at Espressif for writing the foundations of this code.
 #define frconn_of_conn(conn) esp_container_of(conn, RtosConnType, connData)
 
 
-const static char* TAG = "httpd-freertos";
-
-
-int ICACHE_FLASH_ATTR httpdPlatSendData(HttpdInstance *pInstance, HttpdConnData *pConn, char *buff, int len) {
+int httpdPlatSendData(HttpdInstance *pInstance, HttpdConnData *pConn, char *buff, int len) {
     int bytesWritten;
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
     HttpdFreertosInstance *pFR = fr_of_instance(pInstance);
@@ -62,7 +59,7 @@ int ICACHE_FLASH_ATTR httpdPlatSendData(HttpdInstance *pInstance, HttpdConnData 
     return bytesWritten;
 }
 
-void ICACHE_FLASH_ATTR httpdPlatDisconnect(HttpdConnData *pConn) {
+void httpdPlatDisconnect(HttpdConnData *pConn) {
     RtosConnType *pRconn = frconn_of_conn(pConn);
     pRconn->needsClose=1;
     pRconn->needWriteDoneNotif=1; //because the real close is done in the writable select code
@@ -74,23 +71,23 @@ void httpdPlatDisableTimeout(HttpdConnData *pConn) {
 
 #ifdef LINUX
 //Set/clear global httpd lock.
-void ICACHE_FLASH_ATTR httpdPlatLock(HttpdInstance *pInstance) {
+void httpdPlatLock(HttpdInstance *pInstance) {
     HttpdFreertosInstance *pFR = fr_of_instance(pInstance);
     pthread_mutex_lock(&pFR->httpdMux);
 }
 
-void ICACHE_FLASH_ATTR httpdPlatUnlock(HttpdInstance *pInstance) {
+void httpdPlatUnlock(HttpdInstance *pInstance) {
     HttpdFreertosInstance *pFR = fr_of_instance(pInstance);
     pthread_mutex_unlock(&pFR->httpdMux);
 }
 #else
 //Set/clear global httpd lock.
-void ICACHE_FLASH_ATTR httpdPlatLock(HttpdInstance *pInstance) {
+void httpdPlatLock(HttpdInstance *pInstance) {
     HttpdFreertosInstance *pFR = fr_of_instance(pInstance);
     xSemaphoreTakeRecursive(pFR->httpdMux, portMAX_DELAY);
 }
 
-void ICACHE_FLASH_ATTR httpdPlatUnlock(HttpdInstance *pInstance) {
+void httpdPlatUnlock(HttpdInstance *pInstance) {
     HttpdFreertosInstance *pFR = fr_of_instance(pInstance);
     xSemaphoreGiveRecursive(pFR->httpdMux);
 }
@@ -107,15 +104,15 @@ void closeConnection(HttpdFreertosInstance *pInstance, RtosConnType *rconn)
         retval = SSL_shutdown(rconn->ssl);
         if(retval == 1)
         {
-            ESP_LOGD(TAG, "%s success", "SSL_shutdown()");
+            ESP_LOGD(__func__, "%s success", "SSL_shutdown()");
         } else if(retval == 0)
         {
-            ESP_LOGD(TAG, "%s call again", "SSL_shutdown()");
+            ESP_LOGD(__func__, "%s call again", "SSL_shutdown()");
         } else
         {
-            ESP_LOGE(TAG, "%s %d", "SSL_shutdown()", retval);
+            ESP_LOGE(__func__, "%s %d", "SSL_shutdown()", retval);
         }
-        ESP_LOGD(TAG, "%s complete", "SSL_shutdown()");
+        ESP_LOGD(__func__, "%s complete", "SSL_shutdown()");
     }
 #endif
 
@@ -126,7 +123,7 @@ void closeConnection(HttpdFreertosInstance *pInstance, RtosConnType *rconn)
     if(pInstance->httpdFlags & HTTPD_FLAG_SSL)
     {
         SSL_free(rconn->ssl);
-        ESP_LOGD(TAG, "SSL_free() complete");
+        ESP_LOGD(__func__, "SSL_free() complete");
         rconn->ssl = 0;
     }
 #endif
@@ -137,14 +134,14 @@ static SSL_CTX* sslCreateContext()
 {
     SSL_CTX *ctx = NULL;
 
-    ESP_LOGI(TAG, "SSL server context create ......");
+    ESP_LOGI(__func__, "SSL server context create ......");
 
     ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) {
-        ESP_LOGE(TAG, "SSL_CXT_new");
+        ESP_LOGE(__func__, "SSL_CXT_new");
     } else
     {
-        ESP_LOGI(TAG, "OK");
+        ESP_LOGI(__func__, "OK");
     }
 
     return ctx;
@@ -159,24 +156,24 @@ static bool sslSetDerCertificateAndKey(HttpdFreertosInstance *pInstance,
 {
     bool status = true;
 
-    ESP_LOGI(TAG, "SSL server context setting ca certificate......");
+    ESP_LOGI(__func__, "SSL server context setting ca certificate......");
     int ret = SSL_CTX_use_certificate_ASN1(pInstance->ctx, certificate_size, certificate);
     if (!ret) {
 #ifdef LINUX
         ERR_print_errors_fp(stderr);
 #endif
-        ESP_LOGE(TAG, "SSL_CTX_use_certificate_ASN1 %d", ret);
+        ESP_LOGE(__func__, "SSL_CTX_use_certificate_ASN1 %d", ret);
         status = false;
     }
-    ESP_LOGI(TAG, "OK");
+    ESP_LOGI(__func__, "OK");
 
-    ESP_LOGI(TAG, "SSL server context setting private key......");
+    ESP_LOGI(__func__, "SSL server context setting private key......");
     ret = SSL_CTX_use_RSAPrivateKey_ASN1(pInstance->ctx, private_key, private_key_size);
     if (!ret) {
 #ifdef LINUX
         ERR_print_errors_fp(stderr);
 #endif
-        ESP_LOGE(TAG, "SSL_CTX_use_RSAPrivateKey_ASN1 %d", ret);
+        ESP_LOGE(__func__, "SSL_CTX_use_RSAPrivateKey_ASN1 %d", ret);
         status = false;
     }
 
@@ -240,14 +237,14 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     udp_addr.sin_port = htons(ctx->pInstance->udpShutdownPort);
 
     ctx->udpListenFd = socket(AF_INET, SOCK_DGRAM, 0);
-    ESP_LOGI(TAG, "ctx->udpListenFd %d", ctx->udpListenFd);
+    ESP_LOGI(__func__, "ctx->udpListenFd %d", ctx->udpListenFd);
     if(bind(ctx->udpListenFd, (struct sockaddr *)&udp_addr, sizeof(udp_addr)) != 0)
     {
-        ESP_LOGE(TAG, "udp bind failure");
+        ESP_LOGE(__func__, "udp bind failure");
         ctx->shutdown = true;
         return;
     }
-    ESP_LOGI(TAG, "shutdown bound to udp port %d", ctx->pInstance->udpShutdownPort);
+    ESP_LOGI(__func__, "shutdown bound to udp port %d", ctx->pInstance->udpShutdownPort);
 #endif
 
     /* Construct local address structure */
@@ -266,7 +263,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     do{
         ctx->listenFd = socket(AF_INET, SOCK_STREAM, 0);
         if (ctx->listenFd == -1) {
-            ESP_LOGE(TAG, "socket");
+            ESP_LOGE(__func__, "socket");
             vTaskDelay(1000/portTICK_PERIOD_MS);
         }
     } while(ctx->listenFd == -1);
@@ -286,7 +283,7 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     do{
         retBind = bind(ctx->listenFd, (struct sockaddr *)&server_addr, sizeof(server_addr));
         if (retBind != 0) {
-            ESP_LOGE(TAG, "bind to address %s:%d", ctx->serverStr, ctx->pInstance->httpPort);
+            ESP_LOGE(__func__, "bind to address %s:%d", ctx->serverStr, ctx->pInstance->httpPort);
             perror("bind");
             vTaskDelay(1000/portTICK_PERIOD_MS);
         }
@@ -297,13 +294,13 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
         /* Listen to the local connection */
         retListen = listen(ctx->listenFd, ctx->pInstance->httpdInstance.maxConnections);
         if (retListen != 0) {
-            ESP_LOGE(TAG, "listen on fd %d", ctx->listenFd);
+            ESP_LOGE(__func__, "listen on fd %d", ctx->listenFd);
             perror("listen");
             vTaskDelay(1000/portTICK_PERIOD_MS);
         }
     } while(retListen != 0);
 
-    ESP_LOGI(TAG, "esphttpd: active and listening to connections on %s", ctx->serverStr);
+    ESP_LOGI(__func__, "esphttpd: active and listening to connections on %s", ctx->serverStr);
     ctx->shutdown = false;
     ctx->listeningForNewConnections = false;
 }
@@ -335,18 +332,18 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
     if (!socketsFull) {
         FD_SET(ctx->listenFd, &readset);
         if (ctx->listenFd>maxfdp) maxfdp=ctx->listenFd;
-        ESP_LOGD(TAG, "Sel add listen %d", ctx->listenFd);
+        ESP_LOGD(__func__, "Sel add listen %d", ctx->listenFd);
         if(!ctx->listeningForNewConnections)
         {
             ctx->listeningForNewConnections = true;
-            ESP_LOGI(TAG, "listening for new connections on '%s'", ctx->serverStr);
+            ESP_LOGI(__func__, "listening for new connections on '%s'", ctx->serverStr);
         }
     } else
     {
         if(ctx->listeningForNewConnections)
         {
             ctx->listeningForNewConnections = false;
-            ESP_LOGI(TAG, "all %d connections in use on '%s'", ctx->pInstance->httpdInstance.maxConnections, ctx->serverStr);
+            ESP_LOGI(__func__, "all %d connections in use on '%s'", ctx->pInstance->httpdInstance.maxConnections, ctx->serverStr);
         }
     }
 
@@ -358,12 +355,12 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
     //polling all exist client handle,wait until readable/writable
     
     int32 retSelect = select(maxfdp+1, &readset, &writeset, NULL, ctx->selectTimeoutData);
-    ESP_LOGD(TAG, "select retSelect");
+    ESP_LOGD(__func__, "select retSelect");
     if(retSelect <= 0) { return; }
 #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT
     if (FD_ISSET(ctx->udpListenFd, &readset)) {
         ctx->shutdown = true;
-        ESP_LOGI(TAG, "shutting down");
+        ESP_LOGI(__func__, "shutting down");
     }
 #endif
 
@@ -373,7 +370,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
         struct sockaddr_in remote_addr;
         ctx->remoteFd = accept(ctx->listenFd, (struct sockaddr *)&remote_addr, (socklen_t *)&len);
         if (ctx->remoteFd<0) {
-            ESP_LOGE(TAG, "accept failed");
+            ESP_LOGE(__func__, "accept failed");
             perror("accept");
             return;
         }
@@ -381,7 +378,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
         int highestConnection = 0;
         for(highestConnection=0; highestConnection < ctx->pInstance->httpdInstance.maxConnections; highestConnection++) if (ctx->pInstance->rconn[highestConnection].fd==-1) break;
         if (highestConnection == ctx->pInstance->httpdInstance.maxConnections) {
-            ESP_LOGE(TAG, "all connections in use, closing fd");
+            ESP_LOGE(__func__, "all connections in use, closing fd");
             close(ctx->remoteFd);
             return;
         }
@@ -409,29 +406,29 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
         if(ctx->pInstance->httpdFlags & HTTPD_FLAG_SSL)
         {
-            ESP_LOGD(TAG, "SSL server create .....");
+            ESP_LOGD(__func__, "SSL server create .....");
             pRconn->ssl = SSL_new(ctx->pInstance->ctx);
             if (!pRconn->ssl) {
-                ESP_LOGE(TAG, "SSL_new");
+                ESP_LOGE(__func__, "SSL_new");
                 close(ctx->remoteFd);
                 pRconn->fd = -1;
                 return;
             }
-            ESP_LOGD(TAG, "OK");
+            ESP_LOGD(__func__, "OK");
 
             SSL_set_fd(pRconn->ssl, pRconn->fd);
 
-            ESP_LOGD(TAG, "SSL server accept client .....");
+            ESP_LOGD(__func__, "SSL server accept client .....");
             int32 retAcceptSSL = SSL_accept(pRconn->ssl);
             if (!retAcceptSSL) {
                 int ssl_error = SSL_get_error(pRconn->ssl, retAcceptSSL);
-                ESP_LOGE(TAG, "SSL_accept %d", ssl_error);
+                ESP_LOGE(__func__, "SSL_accept %d", ssl_error);
                 close(ctx->remoteFd);
                 SSL_free(pRconn->ssl);
                 pRconn->fd = -1;
                 return;
             }
-            ESP_LOGD(TAG, "OK");
+            ESP_LOGD(__func__, "OK");
         }
 #endif
         struct sockaddr name;
@@ -491,10 +488,10 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
                         int ssl_error = SSL_get_error(pRconn->ssl, retReadSSL);
                         if(ssl_error != SSL_ERROR_NONE)
                         {
-                            ESP_LOGE(TAG, "ssl_error %d, retReadSSL %d, bytesStillAvailable %d", ssl_error, retReadSSL, bytesStillAvailable);
+                            ESP_LOGE(__func__, "ssl_error %d, retReadSSL %d, bytesStillAvailable %d", ssl_error, retReadSSL, bytesStillAvailable);
                         } else
                         {
-                            ESP_LOGD(TAG, "ssl_error %d, retReadSSL %d, bytesStillAvailable %d", ssl_error, retReadSSL, bytesStillAvailable);
+                            ESP_LOGD(__func__, "ssl_error %d, retReadSSL %d, bytesStillAvailable %d", ssl_error, retReadSSL, bytesStillAvailable);
                         }
                     }
 
@@ -551,7 +548,7 @@ PLAT_RETURN platHttpServerTaskDeinit(ServerTaskContext *ctx) {
         }
     }
 
-    ESP_LOGI(TAG, "httpd on %s exiting", ctx->serverStr);
+    ESP_LOGI(__func__, "httpd on %s exiting", ctx->serverStr);
     ctx->pInstance->isShutdown = true;
 #endif /* #ifdef CONFIG_ESPHTTPD_SHUTDOWN_SUPPORT */
 
@@ -595,7 +592,7 @@ HttpdPlatTimerHandle httpdPlatTimerCreate(const char *name, int periodMs, int au
     int retval = timer_create(CLOCK_MONOTONIC, &event, &(handle->timer));
     if(retval != 0)
     {
-        ESP_LOGE(TAG, "timer_create() %d", retval);
+        ESP_LOGE(__func__, "timer_create() %d", retval);
     }
 
     return handle;
@@ -617,7 +614,7 @@ void httpdPlatTimerStart(HttpdPlatTimerHandle handle)
 
     if(retval != 0)
     {
-        ESP_LOGE(TAG, "timer_settime() %d", retval);
+        ESP_LOGE(__func__, "timer_settime() %d", retval);
     }
 }
 
@@ -632,7 +629,7 @@ void httpdPlatTimerStop(HttpdPlatTimerHandle handle)
 
     if(retval != 0)
     {
-        ESP_LOGE(TAG, "timer_settime() %d", retval);
+        ESP_LOGE(__func__, "timer_settime() %d", retval);
     }
 }
 
@@ -667,7 +664,7 @@ void httpdPlatTimerDelete(HttpdPlatTimerHandle timer) {
 #endif
 
 //Httpd initialization routine. Call this to kick off webserver functionality.
-HttpdInitStatus ICACHE_FLASH_ATTR httpdFreertosInitEx(HttpdFreertosInstance *pInstance,
+HttpdInitStatus httpdFreertosInitEx(HttpdFreertosInstance *pInstance,
     const HttpdBuiltInUrl *fixedUrls, int port,
     uint32_t listenAddress,
     void* connectionBuffer, int maxConnections,
@@ -688,14 +685,14 @@ HttpdInitStatus ICACHE_FLASH_ATTR httpdFreertosInitEx(HttpdFreertosInstance *pIn
 
     pInstance->rconn = connectionBuffer;
 
-    ESP_LOGI(TAG, "address %s, port %d, maxConnections %d, mode %s",
+    ESP_LOGI(__func__, "address %s, port %d, maxConnections %d, mode %s",
             serverStr,
             port, maxConnections, (flags & HTTPD_FLAG_SSL) ? "ssl" : "non-ssl");
 
     return status;
 }
 
-HttpdInitStatus ICACHE_FLASH_ATTR httpdFreertosInit(HttpdFreertosInstance *pInstance,
+HttpdInitStatus httpdFreertosInit(HttpdFreertosInstance *pInstance,
     const HttpdBuiltInUrl *fixedUrls, int port,
     void* connectionBuffer, int maxConnections,
     HttpdFlags flags)
@@ -705,12 +702,12 @@ HttpdInitStatus ICACHE_FLASH_ATTR httpdFreertosInit(HttpdFreertosInstance *pInst
     status = httpdFreertosInitEx(pInstance, fixedUrls, port, INADDR_ANY,
                     connectionBuffer, maxConnections,
                     flags);
-    ESP_LOGI(TAG, "init");
+    ESP_LOGI(__func__, "init");
 
     return status;
 }
 
-SslInitStatus ICACHE_FLASH_ATTR httpdFreertosSslInit(HttpdFreertosInstance *pInstance)
+SslInitStatus httpdFreertosSslInit(HttpdFreertosInstance *pInstance)
 {
     SslInitStatus status = SslInitSuccess;
 
@@ -720,7 +717,7 @@ SslInitStatus ICACHE_FLASH_ATTR httpdFreertosSslInit(HttpdFreertosInstance *pIns
         pInstance->ctx = sslCreateContext();
         if(!pInstance->ctx)
         {
-            ESP_LOGE(TAG, "create ssl context");
+            ESP_LOGE(__func__, "create ssl context");
             status = StartFailedSslNotConfigured;
         }
     }
@@ -729,7 +726,7 @@ SslInitStatus ICACHE_FLASH_ATTR httpdFreertosSslInit(HttpdFreertosInstance *pIns
     return status;
 }
 
-void ICACHE_FLASH_ATTR httpdFreertosSslSetCertificateAndKey(HttpdFreertosInstance *pInstance,
+void httpdFreertosSslSetCertificateAndKey(HttpdFreertosInstance *pInstance,
                                         const void *certificate, size_t certificate_size,
                                         const void *private_key, size_t private_key_size)
 {
@@ -741,20 +738,20 @@ void ICACHE_FLASH_ATTR httpdFreertosSslSetCertificateAndKey(HttpdFreertosInstanc
             if(!sslSetDerCertificateAndKey(pInstance, certificate, certificate_size,
                                 private_key, private_key_size))
             {
-                ESP_LOGE(TAG, "sslSetDerCertificate");
+                ESP_LOGE(__func__, "sslSetDerCertificate");
             }
         } else
         {
-            ESP_LOGE(TAG, "Call httpdFreertosSslInit() first");
+            ESP_LOGE(__func__, "Call httpdFreertosSslInit() first");
         }
     } else
     {
-        ESP_LOGE(TAG, "Server not initialized for ssl");
+        ESP_LOGE(__func__, "Server not initialized for ssl");
     }
 #endif
 }
 
-void ICACHE_FLASH_ATTR httpdFreertosSslSetClientValidation(HttpdFreertosInstance *pInstance,
+void httpdFreertosSslSetClientValidation(HttpdFreertosInstance *pInstance,
                                          SslClientVerifySetting verifySetting)
 {
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
@@ -777,16 +774,16 @@ void ICACHE_FLASH_ATTR httpdFreertosSslSetClientValidation(HttpdFreertosInstance
             SSL_CTX_set_verify(pInstance->ctx, flags, 0);
         } else
         {
-            ESP_LOGE(TAG, "Call httpdFreertosSslInit() first");
+            ESP_LOGE(__func__, "Call httpdFreertosSslInit() first");
         }
     } else
     {
-        ESP_LOGE(TAG, "Server not initialized for ssl");
+        ESP_LOGE(__func__, "Server not initialized for ssl");
     }
 #endif
 }
 
-void ICACHE_FLASH_ATTR httpdFreertosSslAddClientCertificate(HttpdFreertosInstance *pInstance,
+void httpdFreertosSslAddClientCertificate(HttpdFreertosInstance *pInstance,
                                           const void *certificate, size_t certificate_size)
 {
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
@@ -794,17 +791,17 @@ void ICACHE_FLASH_ATTR httpdFreertosSslAddClientCertificate(HttpdFreertosInstanc
     int rv = SSL_CTX_add_client_CA(pInstance->ctx, client_cacert);
     if(rv == 0)
     {
-        ESP_LOGE(TAG, "SSL_CTX_add_client_CA failed");
+        ESP_LOGE(__func__, "SSL_CTX_add_client_CA failed");
     }
 #endif
 }
 
-HttpdStartStatus ICACHE_FLASH_ATTR httpdFreertosStart(HttpdFreertosInstance *pInstance)
+HttpdStartStatus httpdFreertosStart(HttpdFreertosInstance *pInstance)
 {
 #ifdef CONFIG_ESPHTTPD_SSL_SUPPORT
     if((pInstance->httpdFlags & HTTPD_FLAG_SSL) && !pInstance->ctx)
     {
-        ESP_LOGE(TAG, "StartFailedSslNotConfigured");
+        ESP_LOGE(__func__, "StartFailedSslNotConfigured");
         return StartFailedSslNotConfigured;
     }
 #endif
@@ -824,7 +821,7 @@ HttpdStartStatus ICACHE_FLASH_ATTR httpdFreertosStart(HttpdFreertosInstance *pIn
 
 #endif
 
-    ESP_LOGI(TAG, "starting server on port port %d, maxConnections %d, mode %s",
+    ESP_LOGI(__func__, "starting server on port port %d, maxConnections %d, mode %s",
             pInstance->httpPort, pInstance->httpdInstance.maxConnections,
             (pInstance->httpdFlags & HTTPD_FLAG_SSL) ? "ssl" : "non-ssl");
 
@@ -840,7 +837,7 @@ void httpdPlatShutdown(HttpdInstance *pInstance)
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if(s <= 0)
     {
-        ESP_LOGE(TAG, "socket %d", s);
+        ESP_LOGE(__func__, "socket %d", s);
     }
 
     struct sockaddr_in udp_addr;
@@ -854,13 +851,13 @@ void httpdPlatShutdown(HttpdInstance *pInstance)
 
     while(!pFR->isShutdown)
     {
-        ESP_LOGI(TAG, "sending shutdown to port %d", pFR->udpShutdownPort);
+        ESP_LOGI(__func__, "sending shutdown to port %d", pFR->udpShutdownPort);
 
         err = sendto(s, pFR, sizeof(pFR), 0,
                 (struct sockaddr*)&udp_addr, sizeof(udp_addr));
         if(err != sizeof(pFR))
         {
-            ESP_LOGE(TAG, "sendto");
+            ESP_LOGE(__func__, "sendto");
             perror("sendto");
         }
 

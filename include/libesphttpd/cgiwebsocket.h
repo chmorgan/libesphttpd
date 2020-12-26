@@ -31,11 +31,11 @@ struct Websock {
 	WebsockPriv *priv;
 };
 
-CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData);
-int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, const char *data, int len, int flags);
-void ICACHE_FLASH_ATTR cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, int reason);
-CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConnData *connData, char *data, int len);
-int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *resource, char *data, int len, int flags);
+CgiStatus cgiWebsocket(HttpdConnData *connData);
+int cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, const char *data, int len, int flags);
+void cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, int reason);
+CgiStatus cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConnData *connData, char *data, int len);
+int cgiWebsockBroadcast(HttpdInstance *pInstance, const char *resource, char *data, int len, int flags);
 
 #ifdef __cplusplus
 } /* extern "C" */

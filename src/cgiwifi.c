@@ -24,7 +24,7 @@ ESP32 Cgi/template routines for the /wifi url.
 
 #include <libesphttpd/kref.h>
 
-static const char *TAG = "esp32_cgiwifi";
+static const char *TAG = "cgiwifi";
 /* Enable this to disallow any changes in AP settings. */
 //#define DEMO_MODE
 

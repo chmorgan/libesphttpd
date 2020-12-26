@@ -31,7 +31,7 @@ static const char *TAG = "ota";
 
 
 // Check that the header of the firmware blob looks like actual firmware...
-static int ICACHE_FLASH_ATTR checkBinHeader(void *buf) {
+static int checkBinHeader(void *buf) {
 	uint8_t *cd = (uint8_t *)buf;
 #ifdef ESP32
 	printf("checkBinHeader: %x %x %x\n", cd[0], ((uint16_t *)buf)[3], ((uint32_t *)buf)[0x6]);
@@ -48,14 +48,14 @@ static int ICACHE_FLASH_ATTR checkBinHeader(void *buf) {
 	return 1;
 }
 
-static int ICACHE_FLASH_ATTR checkEspfsHeader(void *buf) {
+static int checkEspfsHeader(void *buf) {
 	if (memcmp(buf, "ESfs", 4)!=0) return 0;
 	return 1;
 }
 
 
 // Cgi to query which firmware needs to be uploaded next
-CgiStatus ICACHE_FLASH_ATTR cgiGetFirmwareNext(HttpdConnData *connData) {
+CgiStatus cgiGetFirmwareNext(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		return HTTPD_CGI_DONE;
@@ -151,7 +151,7 @@ static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
 }
 
 #ifdef ESP32
-CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
+CgiStatus cgiUploadFirmware(HttpdConnData *connData) {
 	CgiUploadFlashDef *def=(CgiUploadFlashDef*)connData->cgiArg;
 	UploadState *state=(UploadState *)connData->cgiData;
 	esp_err_t err;
@@ -345,7 +345,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 
 #else
 
-CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
+CgiStatus cgiUploadFirmware(HttpdConnData *connData) {
 	CgiUploadFlashDef *def=(CgiUploadFlashDef*)connData->cgiArg;
 	UploadState *state=(UploadState *)connData->cgiData;
 	int len;
@@ -515,7 +515,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 
 static HttpdPlatTimerHandle resetTimer;
 
-static void ICACHE_FLASH_ATTR resetTimerCb(void *arg) {
+static void resetTimerCb(void *arg) {
 #ifndef ESP32
 	system_upgrade_flag_set(UPGRADE_FLAG_FINISH);
 	system_upgrade_reboot();
@@ -525,7 +525,7 @@ static void ICACHE_FLASH_ATTR resetTimerCb(void *arg) {
 }
 
 // Handle request to reboot into the new firmware
-CgiStatus ICACHE_FLASH_ATTR cgiRebootFirmware(HttpdConnData *connData) {
+CgiStatus cgiRebootFirmware(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		return HTTPD_CGI_DONE;
@@ -547,7 +547,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiRebootFirmware(HttpdConnData *connData) {
 }
 
 // Handle request to set boot flag
-CgiStatus ICACHE_FLASH_ATTR cgiSetBoot(HttpdConnData *connData) {
+CgiStatus cgiSetBoot(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		return HTTPD_CGI_DONE;
@@ -580,7 +580,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiSetBoot(HttpdConnData *connData) {
 }
 
 // Handle request to format a data partition
-CgiStatus ICACHE_FLASH_ATTR cgiEraseFlash(HttpdConnData *connData) {
+CgiStatus cgiEraseFlash(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		return HTTPD_CGI_DONE;
@@ -637,7 +637,7 @@ static int check_partition_valid_app(const esp_partition_t *partition)
 }
 
 // Cgi to query info about partitions and firmware
-CgiStatus ICACHE_FLASH_ATTR cgiGetFlashInfo(HttpdConnData *connData) {
+CgiStatus cgiGetFlashInfo(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		return HTTPD_CGI_DONE;

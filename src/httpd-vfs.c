@@ -103,7 +103,7 @@ static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 	return outlen;
 }
 
-CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
+CgiStatus cgiEspVfsGet(HttpdConnData *connData) {
 	FILE *file=connData->cgiData;
 	int len;
 	char buff[FILE_CHUNK_LEN];
@@ -245,7 +245,7 @@ typedef struct {
 
 typedef void (* TplCallback)(HttpdConnData *connData, char *token, void **arg);
 
-CgiStatus ICACHE_FLASH_ATTR cgiEspVfsTemplate(HttpdConnData *connData) {
+CgiStatus cgiEspVfsTemplate(HttpdConnData *connData) {
 	TplData *tpd=connData->cgiData;
 	int len;
 	int x, sp=0;

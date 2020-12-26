@@ -24,10 +24,6 @@ typedef TimerHandle_t HttpdPlatTimerHandle;
 typedef xTimerHandle HttpdPlatTimerHandle;
 #endif
 
-#ifdef ESP32
-#define ICACHE_FLASH_ATTR
-#endif
-
 #elif defined(linux)
 
 #include <unistd.h>
@@ -49,9 +45,6 @@ typedef struct
 } HttpdPlatTimer;
 
 typedef HttpdPlatTimer* HttpdPlatTimerHandle;
-
-#define ICACHE_FLASH_ATTR
-#define ICACHE_RODATA_ATTR
 
 #else // no-os, map to os-specific versions that have to be defined
 

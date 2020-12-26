@@ -8,7 +8,6 @@ Broken out because esp-idf is expected to get better routines for this.
 */
 
 #include <libesphttpd/esp.h>
-#ifdef ESP32
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,6 +104,3 @@ int esp32flashRebootIntoOta() {
 	software_reset();
 	return 1;
 }
-
-
-#endif

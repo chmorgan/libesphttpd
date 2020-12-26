@@ -18,7 +18,6 @@ Websocket support for esphttpd. Inspired by https://github.com/dangrie158/ESP-82
 #include "libesphttpd/cgiwebsocket.h"
 
 #include "esp_log.h"
-const static char* TAG = "cgiwebsocket";
 
 #define WS_KEY_IDENTIFIER "Sec-WebSocket-Key: "
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -88,7 +87,7 @@ struct WebsockPriv {
 
 static Websock *llStart=NULL;
 
-static int ICACHE_FLASH_ATTR sendFrameHead(Websock *ws, int opcode, int len) {
+static int sendFrameHead(Websock *ws, int opcode, int len) {
 	char buf[14];
 	int i=0;
 	buf[i++]=opcode;
@@ -106,11 +105,11 @@ static int ICACHE_FLASH_ATTR sendFrameHead(Websock *ws, int opcode, int len) {
 	} else {
 		buf[i++]=len;
 	}
-	ESP_LOGD(TAG, "Sent frame head for payload of %d bytes", len);
+	ESP_LOGD(__func__, "Sent frame head for payload of %d bytes", len);
 	return httpdSend(ws->conn, buf, i);
 }
 
-int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, const char *data, int len, int flags) {
+int cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, const char *data, int len, int flags) {
 	int r=0;
 	int fl=0;
 
@@ -125,7 +124,7 @@ int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, co
 	if (!(flags&WEBSOCK_FLAG_MORE)) fl|=FLAG_FIN;
 
     if (ws->conn->isConnectionClosed) {
-        ESP_LOGE(TAG, "Websocket closed, cannot send");
+        ESP_LOGE(__func__, "Websocket closed, cannot send");
         return WEBSOCK_CLOSED;
     }
 
@@ -136,7 +135,7 @@ int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, co
 }
 
 //Broadcast data to all websockets at a specific url. Returns the amount of connections sent to.
-int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *resource, char *data, int len, int flags) {
+int cgiWebsockBroadcast(HttpdInstance *pInstance, const char *resource, char *data, int len, int flags) {
 	Websock *lw=llStart;
 	int ret=0;
 	while (lw!=NULL) {
@@ -152,7 +151,7 @@ int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *
 }
 
 
-void ICACHE_FLASH_ATTR cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, int reason) {
+void cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, int reason) {
 	char rs[2]={reason>>8, reason&0xff};
 	sendFrameHead(ws, FLAG_FIN|OPCODE_CLOSE, 2);
 	httpdSend(ws->conn, rs, 2);
@@ -161,7 +160,7 @@ void ICACHE_FLASH_ATTR cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, 
 }
 
 
-static void ICACHE_FLASH_ATTR websockFree(Websock *ws) {
+static void websockFree(Websock *ws) {
 	if (ws->closeCb) ws->closeCb(ws);
 	//Clean up linked list
 	if (llStart==ws) {
@@ -175,7 +174,7 @@ static void ICACHE_FLASH_ATTR websockFree(Websock *ws) {
 	if (ws->priv) free(ws->priv);
 }
 
-CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConnData *connData, char *data, int len) {
+CgiStatus cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConnData *connData, char *data, int len) {
 	int i, j, sl;
 	int r=HTTPD_CGI_MORE;
 	int wasHeaderByte;
@@ -224,7 +223,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConn
 			//received here at the same time; no more byte iterations till the end of this frame.
 			//First, unmask the data
 			sl=len-i;
-			ESP_LOGD(TAG, "Frame payload. wasHeaderByte %d fr.len %d sl %d cmd 0x%x", wasHeaderByte, (int)ws->priv->fr.len, (int)sl, ws->priv->fr.flags);
+			ESP_LOGD(__func__, "Frame payload. wasHeaderByte %d fr.len %d sl %d cmd 0x%x", wasHeaderByte, (int)ws->priv->fr.len, (int)sl, ws->priv->fr.flags);
 			if (sl > ws->priv->fr.len) sl=ws->priv->fr.len;
 			for (j=0; j<sl; j++) data[i+j]^=(ws->priv->fr.mask[(ws->priv->maskCtr++)&3]);
 
@@ -258,15 +257,15 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConn
 					if (ws->recvCb) ws->recvCb(ws, data+i, sl, flags);
 				}
 			} else if ((ws->priv->fr.flags&OPCODE_MASK)==OPCODE_CLOSE) {
-				ESP_LOGD(TAG, "Got close frame");
+				ESP_LOGD(__func__, "Got close frame");
 				if (!ws->priv->closedHere) {
-					ESP_LOGD(TAG, "Sending response close frame");
+					ESP_LOGD(__func__, "Sending response close frame");
 					cgiWebsocketClose(pInstance, ws, ((data[i]<<8)&0xff00)+(data[i+1]&0xff));
 				}
 				r=HTTPD_CGI_DONE;
 				break;
 			} else {
-				if (!ws->priv->frameCont) ESP_LOGE(TAG, "Unknown opcode 0x%X", ws->priv->fr.flags&OPCODE_MASK);
+				if (!ws->priv->frameCont) ESP_LOGE(__func__, "Unknown opcode 0x%X", ws->priv->fr.flags&OPCODE_MASK);
 			}
 			i+=sl-1;
 			ws->priv->fr.len-=sl;
@@ -288,13 +287,13 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConn
 }
 
 //Websocket 'cgi' implementation
-CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData) {
+CgiStatus cgiWebsocket(HttpdConnData *connData) {
 	char buff[256];
 	int i;
 	sha1nfo s;
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
-		ESP_LOGD(TAG, "Cleanup");
+		ESP_LOGD(__func__, "Cleanup");
 		if (connData->cgiData) {
 			Websock *ws=(Websock*)connData->cgiData;
 			websockFree(ws);
@@ -308,7 +307,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData) {
 //		httpd_printf("WS: First call\n");
 		//First call here. Check if client headers are OK, send server header.
 		i=httpdGetHeader(connData, "Upgrade", buff, sizeof(buff)-1);
-		ESP_LOGD(TAG, "Upgrade: %s", buff);
+		ESP_LOGD(__func__, "Upgrade: %s", buff);
 		if (i && strcasecmp(buff, "websocket")==0) {
 			i=httpdGetHeader(connData, "Sec-WebSocket-Key", buff, sizeof(buff)-1);
 			if (i) {
@@ -317,14 +316,14 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData) {
 				// Alloc structs
 				connData->cgiData=malloc(sizeof(Websock));
 				if (connData->cgiData==NULL) {
-					ESP_LOGE(TAG, "Can't allocate mem for websocket");
+					ESP_LOGE(__func__, "Can't allocate mem for websocket");
 					return HTTPD_CGI_DONE;
 				}
 				memset(connData->cgiData, 0, sizeof(Websock));
 				Websock *ws=(Websock*)connData->cgiData;
 				ws->priv=malloc(sizeof(WebsockPriv));
 				if (ws->priv==NULL) {
-					ESP_LOGE(TAG, "Can't allocate mem for websocket priv");
+					ESP_LOGE(__func__, "Can't allocate mem for websocket priv");
 					free(connData->cgiData);
 					connData->cgiData=NULL;
 					return HTTPD_CGI_DONE;

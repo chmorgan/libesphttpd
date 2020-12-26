@@ -12,7 +12,7 @@
 
 #include "libesphttpd_base64.h"
 
-static const int base64dec_tab[256] ICACHE_RODATA_ATTR={
+static const int base64dec_tab[256]={
 	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 	255,255,255,255,255,255,255,255,255,255,255, 62,255,255,255, 63,
@@ -32,7 +32,7 @@ static const int base64dec_tab[256] ICACHE_RODATA_ATTR={
 };
 
 #if 0
-static int ICACHE_FLASH_ATTR base64decode(const char in[4], char out[3]) {
+static int base64decode(const char in[4], char out[3]) {
 	uint8_t v[4];
 
 	v[0]=base64dec_tab[(unsigned)in[0]];
@@ -48,7 +48,7 @@ static int ICACHE_FLASH_ATTR base64decode(const char in[4], char out[3]) {
 #endif
 
 /* decode a base64 string in one shot */
-int ICACHE_FLASH_ATTR  __attribute__((weak)) libesphttpd_base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
+int  __attribute__((weak)) libesphttpd_base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
 	unsigned int ii, io;
 	uint32_t v;
 	unsigned int rem;
@@ -75,7 +75,7 @@ int ICACHE_FLASH_ATTR  __attribute__((weak)) libesphttpd_base64_decode(size_t in
 	return io;
 }
 
-static const uint8_t base64enc_tab[64]= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const uint8_t base64enc_tab[64]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 #if 0
 void base64encode(const unsigned char in[3], unsigned char out[4], int count) {
@@ -86,7 +86,7 @@ void base64encode(const unsigned char in[3], unsigned char out[4], int count) {
 }
 #endif
 
-int ICACHE_FLASH_ATTR __attribute__((weak)) libesphttpd_base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
+int __attribute__((weak)) libesphttpd_base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
 	unsigned ii, io;
 	uint32_t v;
 	unsigned rem;

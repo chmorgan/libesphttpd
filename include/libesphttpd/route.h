@@ -39,6 +39,6 @@
 #define ROUTE_WS(path, callback)                   ROUTE_CGI_ARG((path), cgiWebsocket, (WsConnectedCb)(callback))
 
 /** Catch-all filesystem route */
-#define ROUTE_FILESYSTEM()                         ROUTE_CGI("*", cgiEspVfsGet)
+#define ROUTE_FILESYSTEM(filepath)                 ROUTE_CGI_ARG("*", cgiEspVfsGet, (const char*)(filepath))
 
 #define ROUTE_END() {NULL, NULL, NULL, NULL}

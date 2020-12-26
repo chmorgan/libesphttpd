@@ -225,9 +225,9 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     memset(&udp_addr, 0, sizeof(udp_addr)); /* Zero out structure */
     udp_addr.sin_family = AF_INET;			/* Internet address family */
     udp_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    #ifndef LINUX
+#ifndef LINUX
     udp_addr.sin_len = sizeof(udp_addr);
-    #endif
+#endif
 
     // FIXME: use and increment of currentUdpShutdownPort is not thread-safe
     // and should use a mutex

@@ -222,7 +222,10 @@ void platHttpServerTaskInit(ServerTaskContext *ctx, HttpdFreertosInstance *pInst
     ctx->pInstance = pInstance;
 
 #ifdef linux
-    pthread_mutex_init(&ctx->pInstance->httpdMux, NULL);
+    pthread_mutexattr_t mutexattr;
+    pthread_mutexattr_init(&mutexattr);
+    pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&ctx->pInstance->httpdMux, &mutexattr);
 #else
     ctx->pInstance->httpdMux = xSemaphoreCreateRecursiveMutex();
 #endif

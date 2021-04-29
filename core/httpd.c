@@ -854,7 +854,7 @@ CallbackStatus ICACHE_FLASH_ATTR httpdRecvCb(HttpdInstance *pInstance, HttpdConn
                     httpdProcessRequest(pInstance, conn);
                 }
             }
-        } else if (conn->post.len!=0) {
+        } else if (conn->post.buff && conn->post.len!=0) {
             //This byte is a POST byte.
             conn->post.buff[conn->post.buffLen++]=data[x];
             conn->post.received++;

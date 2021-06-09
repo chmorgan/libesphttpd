@@ -397,7 +397,7 @@ void ICACHE_FLASH_ATTR httpdFlushSendBuffer(HttpdInstance *pInstance, HttpdConnD
         //Finish chunk with cr/lf
         if(conn->priv.sendBuffLen + 2 <= HTTPD_SENDBUFF_SIZE) {
             // Add chunk closing.
-            strcpy(&conn->priv.sendBuff[conn->priv.sendBuffLen], "\r\n");
+            memcpy(&conn->priv.sendBuff[conn->priv.sendBuffLen], "\r\n", 2);
             conn->priv.sendBuffLen += 2;
             assert(conn->priv.sendBuffLen <= HTTPD_SENDBUFF_SIZE);
         } else {

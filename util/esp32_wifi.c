@@ -18,10 +18,13 @@ ESP32 Cgi/template routines for the /wifi url.
 #include <freertos/timers.h>
 
 #include <esp_event.h>
-#include <esp_log.h>
 #include <esp_wifi.h>
 #include <esp_wifi_types.h>
 #include <esp_wps.h>
+
+/* Enable this to show verbose logging for this file only. */
+//#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+#include <esp_log.h>
 
 #include <libesphttpd/kref.h>
 
@@ -31,7 +34,9 @@ static const char *TAG = "esp32_cgiwifi";
 
 #define MAX_NUM_APS 32
 #define SCAN_TIMEOUT (60 * 1000 / portTICK_PERIOD_MS)
-#define CFG_TIMEOUT (60 * 1000 / portTICK_PERIOD_MS)
+#define WPS_TIMEOUT (60 * 1000 / portTICK_PERIOD_MS)
+#define CONNECT_TIMEOUT (10 * 1000 / portTICK_PERIOD_MS)
+#define WATCHDOG_TIMEOUT (30 * 1000 / portTICK_PERIOD_MS)
 #define CFG_TICKS (1000 / portTICK_PERIOD_MS)
 #define CFG_DELAY (100 / portTICK_PERIOD_MS)
 
@@ -77,6 +82,14 @@ const char *state_names[] = {
     "Connecting",
     "Fall Back"};
 
+// corresponding to wifi_mode_t
+static const char *wifi_mode_names[] = {
+    [WIFI_MODE_NULL] = "Disabled",
+    [WIFI_MODE_STA] = "STA",      /**< WiFi station mode */
+    [WIFI_MODE_AP] = "AP",        /**< WiFi soft-AP mode */
+    [WIFI_MODE_APSTA] = "AP+STA", /**< WiFi station + soft-AP mode */
+    [WIFI_MODE_MAX] = "invalid"};
+
 /* Holds complete WiFi config for both STA and AP, the mode and whether *\
 \* the WiFi should connect to an AP in STA or APSTA mode.               */
 struct wifi_cfg
@@ -106,6 +119,7 @@ const static int BIT_CONNECTED = BIT0;
 const static int BIT_WPS_SUCCESS = BIT1;
 const static int BIT_WPS_FAILED = BIT2;
 #define BITS_WPS (BIT_WPS_SUCCESS | BIT_WPS_FAILED)
+const static int BIT_STA_STARTED = BIT3;
 
 static EventGroupHandle_t wifi_events = NULL;
 
@@ -842,7 +856,7 @@ static void handle_config_timer(TimerHandle_t timer)
             cfg_state.state = cfg_state_update;
             delay = CFG_DELAY;
         }
-        else if (time_after(now, (cfg_state.timestamp + CFG_TIMEOUT)) || (events & BIT_WPS_FAILED))
+        else if (time_after(now, (cfg_state.timestamp + WPS_TIMEOUT)) || (events & BIT_WPS_FAILED))
         {
             /* Failure or timeout. Trigger fall-back to the previous config. */
             ESP_LOGI(TAG, "[%s] WPS failed, restoring saved config.",
@@ -891,7 +905,7 @@ static void handle_config_timer(TimerHandle_t timer)
             /* We have a connection! \o/ */
             cfg_state.state = cfg_state_connected;
         }
-        else if (time_after(now, (cfg_state.timestamp + CFG_TIMEOUT)))
+        else if (time_after(now, (cfg_state.timestamp + CONNECT_TIMEOUT)))
         {
             /* Timeout while waiting for connection. Try falling back to the *\
             \* saved configuration.                                          */
@@ -906,26 +920,55 @@ static void handle_config_timer(TimerHandle_t timer)
         break;
     case cfg_state_fallback:
         /* Something went wrong, try going back to the previous config. */
-        ESP_LOGI(TAG, "[%s] restoring saved Wifi config.",
-                 __FUNCTION__);
+        ESP_LOGI(TAG, "[%s] restoring saved Wifi config.", __FUNCTION__);
+        ESP_LOGD(TAG, "Saved Mode:%s, Connect:%d", wifi_mode_names[cfg_state.saved.mode], cfg_state.saved.connect);
         (void)esp_wifi_disconnect();
-        set_wifi_cfg(&(cfg_state.saved));
+        memmove(&cfg_state.new, &cfg_state.saved, sizeof(cfg_state.new)); // copy saved over new
+        set_wifi_cfg(&(cfg_state.new));
         cfg_state.state = cfg_state_failed;
         break;
     case cfg_state_idle:
     case cfg_state_connected:
     case cfg_state_failed:
+        /**
+         * Watchdog to make sure the STA stays connected.  
+         * This is useful since ESP-IDF has trouble reconnecting STA sometimes (i.e. you reboot your router).
+         * Makes sure that the current WiFi state is consistent with "cfg_state.new".
+         * This does not connect STA on Boot-up if WiFi was previously configured, use startCgiWifi() for that.
+         */
+        if (cfg_state.new.mode == WIFI_MODE_AP ||
+            cfg_state.new.mode == WIFI_MODE_NULL ||
+            !cfg_state.new.connect)
+        {
+            /* AP-only mode or not supposed to be connected, so nothing to check. */
+            ESP_LOGD(TAG, "Wifi config watchdog skipped b/c Mode:%s, Connect:%d", wifi_mode_names[cfg_state.new.mode], cfg_state.new.connect);
+        }
+        else
+        {
+            /* System should be connected to the AP, make sure it is. */
+            if (sta_connected())
+            {
+                ESP_LOGD(TAG, "Wifi config watchdog OK.");
+            }
+            else
+            {
+                ESP_LOGI(TAG, "Wifi config watchdog triggered!  Retry connect to STA.");
+                (void)esp_wifi_disconnect();
+                set_wifi_cfg(&(cfg_state.new));
+            }
+        }
         break;
     }
 
 err_out:
-    if (delay > 0)
+    if (delay == 0)
     {
-        /* We are in a transitional state, re-arm the timer. */
-        if (xTimerChangePeriod(config_timer, delay, CFG_DELAY) != pdPASS)
-        {
-            cfg_state.state = cfg_state_failed;
-        }
+        delay = WATCHDOG_TIMEOUT; // check watch-dog-timer
+    }
+    /* We are in a transitional state, re-arm the timer. */
+    if (xTimerChangePeriod(config_timer, delay, CFG_DELAY) != pdPASS)
+    {
+        cfg_state.state = cfg_state_failed;
     }
 
     ESP_LOGD(TAG, "[%s] Leaving. State: %s delay: %d",
@@ -973,6 +1016,12 @@ void cgiWifiEventCb(system_event_t *event)
 
     switch (event->event_id)
     {
+    case SYSTEM_EVENT_STA_START:
+        xEventGroupSetBits(wifi_events, BIT_STA_STARTED);
+        break;
+    case SYSTEM_EVENT_STA_STOP:
+        xEventGroupClearBits(wifi_events, BIT_STA_STARTED);
+        break;
     case SYSTEM_EVENT_SCAN_DONE:
         wifi_scan_done(event);
         break;
@@ -980,6 +1029,7 @@ void cgiWifiEventCb(system_event_t *event)
     case SYSTEM_EVENT_GOT_IP6:
         xEventGroupSetBits(wifi_events, BIT_CONNECTED);
         break;
+    case SYSTEM_EVENT_STA_LOST_IP:
     case SYSTEM_EVENT_STA_DISCONNECTED:
         xEventGroupClearBits(wifi_events, BIT_CONNECTED);
         break;
@@ -1000,7 +1050,7 @@ void cgiWifiEventCb(system_event_t *event)
  * to cfg->saved, then compare it to the requested new configuration. If    *
  * the two configurations are different, it will store the new config in    *
 \* cfg->new and trigger the asynchronous mechanism to handle the update.    */
-static esp_err_t update_wifi(struct wifi_cfg_state *cfg, struct wifi_cfg *new)
+static esp_err_t update_wifi(struct wifi_cfg_state *cfg, struct wifi_cfg *new, bool no_fallback)
 {
     bool connected;
     bool update;
@@ -1020,41 +1070,48 @@ static esp_err_t update_wifi(struct wifi_cfg_state *cfg, struct wifi_cfg *new)
     }
 
     result = ESP_OK;
-
-    /* Save current configuration for fall-back. */
-    result = get_wifi_cfg(&(cfg->saved));
-    if (result != ESP_OK)
-    {
-        ESP_LOGI(TAG, "[%s] Error fetching current WiFi config.",
-                 __FUNCTION__);
-        goto err_out;
-    }
-
-    /* Clear station configuration if we are not connected to an AP. */
-    connected = sta_connected();
-    if (!connected)
-    {
-        memset(&(cfg->saved.sta), 0x0, sizeof(cfg->saved.sta));
-    }
-
-    memmove(&(cfg->new), new, sizeof(cfg->new));
     update = false;
+    memmove(&(cfg->new), new, sizeof(cfg->new));
 
-    /* Do some naive checks to see if the new configuration is an actual   *\
-    \* change. Should be more thorough by actually comparing the elements. */
-    if (cfg->new.mode != cfg->saved.mode)
+    if (no_fallback)
     {
-        update = true;
+        memmove(&(cfg->saved), new, sizeof(cfg->saved)); // Also copy new to saved if no fallback.
+        update = true;                                   // force the update
     }
-
-    if ((new->mode == WIFI_MODE_AP || new->mode == WIFI_MODE_APSTA) && memcmp(&(cfg->new.ap), &(cfg->saved.ap), sizeof(cfg->new.ap)))
+    else
     {
-        update = true;
-    }
+        /* Save current configuration for fall-back. */
+        result = get_wifi_cfg(&(cfg->saved));
+        if (result != ESP_OK)
+        {
+            ESP_LOGI(TAG, "[%s] Error fetching current WiFi config.",
+                     __FUNCTION__);
+            goto err_out;
+        }
 
-    if ((new->mode == WIFI_MODE_STA || new->mode == WIFI_MODE_APSTA) && memcmp(&(cfg->new.sta), &(cfg->saved.sta), sizeof(cfg->new.sta)))
-    {
-        update = true;
+        /* Clear station configuration if we are not connected to an AP. */
+        connected = sta_connected();
+        if (!connected)
+        {
+            memset(&(cfg->saved.sta), 0x0, sizeof(cfg->saved.sta));
+        }
+
+        /* Do some naive checks to see if the new configuration is an actual   *\
+        \* change. Should be more thorough by actually comparing the elements. */
+        if (cfg->new.mode != cfg->saved.mode)
+        {
+            update = true;
+        }
+
+        if ((new->mode == WIFI_MODE_AP || new->mode == WIFI_MODE_APSTA) && memcmp(&(cfg->new.ap), &(cfg->saved.ap), sizeof(cfg->new.ap)))
+        {
+            update = true;
+        }
+
+        if ((new->mode == WIFI_MODE_STA || new->mode == WIFI_MODE_APSTA) && memcmp(&(cfg->new.sta), &(cfg->saved.sta), sizeof(cfg->new.sta)))
+        {
+            update = true;
+        }
     }
 
     /* If new config is different, trigger asynchronous update. This gives *\
@@ -1073,6 +1130,64 @@ static esp_err_t update_wifi(struct wifi_cfg_state *cfg, struct wifi_cfg *new)
 
 err_out:
     xSemaphoreGive(cfg->lock);
+    return result;
+}
+
+/**
+ * (Optional) Start WiFi STA using saved settings.
+ *  Call it from main task after calls to esp_event_loop_init() and esp_wifi_start().  (This may block until STA is started.)
+ */
+esp_err_t startCgiWifi(void)
+{
+    struct wifi_cfg cfg;
+    wifi_sta_config_t *sta;
+    esp_err_t result;
+    EventBits_t uxBits;
+    const TickType_t xTicksToWait = 100 / portTICK_PERIOD_MS;
+
+    memset(&cfg, 0x0, sizeof(cfg));
+
+    result = get_wifi_cfg(&cfg);
+    if (result != ESP_OK)
+    {
+        ESP_LOGE(TAG, "[%s] Error fetching WiFi config.", __FUNCTION__);
+        goto err_out;
+    }
+    if (cfg.mode != WIFI_MODE_STA && cfg.mode != WIFI_MODE_APSTA)
+    {
+        ESP_LOGI(TAG, "Startup WiFi STA disabled.");
+        goto err_out;
+    }
+    sta = &(cfg.sta.sta);
+
+    /* We want STA to actually connect to the AP. */
+    cfg.connect = true;
+
+    ESP_LOGI(TAG, "Startup connect to AP %s pw %s",
+             sta->ssid, sta->password);
+
+    uxBits = xEventGroupWaitBits(
+        wifi_events,     /* The event group being tested. */
+        BIT_STA_STARTED, /* The bits within the event group to wait for. */
+        pdFALSE,         /* bits should not be cleared before returning. */
+        pdFALSE,         /* Don't wait for both bits, either bit will do. */
+        xTicksToWait);   /* Wait a maximum of 100ms for either bit to be set. */
+
+    if (uxBits & BIT_STA_STARTED)
+    {
+        /* xEventGroupWaitBits() returned because BIT_STA_STARTED was set. */
+        result = update_wifi(&cfg_state, &cfg, true);
+    }
+    else
+    {
+        /* xEventGroupWaitBits() returned because xTicksToWait ticks passed
+      without BIT_STA_STARTED becoming set. */
+        ESP_LOGE(TAG, "[%s] Error STA not started.", __FUNCTION__);
+        result = ESP_FAIL;
+        goto err_out;
+    }
+
+err_out:
     return result;
 }
 
@@ -1128,7 +1243,7 @@ CgiStatus cgiWiFiConnect(HttpdConnData *connData)
     ESP_LOGI(TAG, "Trying to connect to AP %s pw %s",
              sta->ssid, sta->password);
 
-    result = update_wifi(&cfg_state, &cfg);
+    result = update_wifi(&cfg_state, &cfg, false);
     if (result == ESP_OK)
     {
         redirect = "connecting.html";
@@ -1191,22 +1306,15 @@ CgiStatus cgiWiFiSetMode(HttpdConnData *connData)
 
         cfg.mode = mode;
 
-        ESP_LOGI(TAG, "[%s] Switching to WiFi mode %s", __FUNCTION__,
-                 mode == WIFI_MODE_AP ? "SoftAP" : mode == WIFI_MODE_APSTA ? "STA+AP"
-                                               : mode == WIFI_MODE_STA     ? "Client"
-                                                                           : "Disabled");
+        ESP_LOGI(TAG, "[%s] Switching to WiFi mode %s", __FUNCTION__, wifi_mode_names[mode]);
 
-        result = update_wifi(&cfg_state, &cfg);
+        result = update_wifi(&cfg_state, &cfg, false);
         if (result != ESP_OK)
         {
             ESP_LOGE(TAG, "[%s] Setting WiFi config failed", __FUNCTION__);
         }
 #else
-        ESP_LOGI(TAG, "[%s] Demo mode, not switching to WiFi mode %s",
-                 __FUNCTION__,
-                 mode == WIFI_MODE_AP ? "SoftAP" : mode == WIFI_MODE_APSTA ? "STA+AP"
-                                               : mode == WIFI_MODE_STA     ? "Client"
-                                                                           : "Disabled");
+        ESP_LOGI(TAG, "[%s] Demo mode, not switching to WiFi mode %s", __FUNCTION__, wifi_mode_names[mode]);
 #endif
     }
 
@@ -1370,7 +1478,7 @@ CgiStatus cgiWiFiAPSettings(HttpdConnData *connData)
             strlcpy((char *)cfg.ap.ap.password, pass, sizeof(cfg.ap.ap.password));
         }
 
-        result = update_wifi(&cfg_state, &cfg);
+        result = update_wifi(&cfg_state, &cfg, false);
         if (result != ESP_OK)
         {
             ESP_LOGE(TAG, "[%s] Setting WiFi config failed", __FUNCTION__);

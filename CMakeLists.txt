@@ -29,6 +29,7 @@ idf_component_register(
              "json"
              "spi_flash"
              "wpa_supplicant"
+             "openssl"
 )
 
 target_compile_definitions (${COMPONENT_TARGET} PUBLIC -DFREERTOS)

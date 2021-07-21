@@ -427,7 +427,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
                 ESP_LOGE(TAG, "SSL_new");
                 close(ctx->remoteFd);
                 pRconn->fd = -1;
-                continue;
+                return;
             }
             ESP_LOGD(TAG, "OK");
 
@@ -441,7 +441,7 @@ void platHttpServerTaskProcess(ServerTaskContext *ctx) {
                 close(ctx->remoteFd);
                 SSL_free(pRconn->ssl);
                 pRconn->fd = -1;
-                continue;
+                return;
             }
             ESP_LOGD(TAG, "OK");
         }

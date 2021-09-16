@@ -15,8 +15,7 @@ Connector to let httpd use the espfs filesystem to serve the files in it.
 #include <libesphttpd/httpd-espfs.h>
 
 #ifdef CONFIG_ESPHTTPD_USE_ESPFS
-#include "espfs.h"
-#include "espfsformat.h"  // just for FLAG_GZIP
+#include "libespfs/espfs.h"
 #include "esp_log.h"
 const static char* TAG = "httpdespfs";
 
@@ -26,9 +25,9 @@ const static char* TAG = "httpdespfs";
 // If the client does not advertise that he accepts GZIP send following warning message (telnet users for e.g.)
 static const char *gzipNonSupportedMessage = "HTTP/1.0 501 Not implemented\r\nServer: esp8266-httpd/"HTTPDVER"\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 52\r\n\r\nYour browser does not accept gzip-compressed data.\r\n";
 
-static EspFs *espfs = NULL;
+static espfs_fs_t *espfs = NULL;
 
-void httpdRegisterEspfs(EspFs *fs) {
+void httpdRegisterEspfs(espfs_fs_t *fs) {
 	espfs = fs;
 }
 
@@ -38,9 +37,9 @@ void httpdRegisterEspfs(EspFs *fs) {
  * @param indexname - filename at the path
  * @return file pointer or NULL
  */
-static EspFsFile *tryOpenIndex_do(const char *path, const char *indexname) {
+static espfs_file_t *tryOpenIndex_do(const char *path, const char *indexname) {
 	char fname[100];
-	EspFsFile *retval;
+	espfs_file_t *retval;
 	size_t url_len = strlen(path);
 	size_t index_len = strlen(indexname);
 	bool needSlash = false;
@@ -70,7 +69,7 @@ static EspFsFile *tryOpenIndex_do(const char *path, const char *indexname) {
 		strcat(fname, indexname);
 
 		// Try to open, returns NULL if failed
-		retval = espFsOpen(espfs, fname);
+		retval = espfs_fopen(espfs, fname);
 	}
 
 	return retval;
@@ -81,8 +80,8 @@ static EspFsFile *tryOpenIndex_do(const char *path, const char *indexname) {
  * @param path - directory
  * @return file pointer or NULL
  */
-EspFsFile *tryOpenIndex(const char *path) {
-	EspFsFile * file;
+espfs_file_t *tryOpenIndex(const char *path) {
+	espfs_file_t * file;
 	// A dot in the filename probably means extension
 	// no point in trying to look for index.
 	if (strchr(path, '.') != NULL) return NULL;
@@ -104,7 +103,7 @@ EspFsFile *tryOpenIndex(const char *path) {
 
 CgiStatus ICACHE_FLASH_ATTR
 serveStaticFile(HttpdConnData *connData, const char* filepath) {
-	EspFsFile *file=connData->cgiData;
+	espfs_file_t *file=connData->cgiData;
 	int len;
 	char buff[FILE_CHUNK_LEN+1];
 	char acceptEncodingBuffer[64];
@@ -112,7 +111,7 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 
 	if (connData->isConnectionClosed) {
 		//Connection closed. Clean up.
-		espFsClose(file);
+		espfs_fclose(file);
 		return HTTPD_CGI_DONE;
 	}
 
@@ -125,7 +124,7 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 		}
 
 		//First call to this cgi. Open the file so we can read it.
-		file = espFsOpen(espfs, filepath);
+		file = espfs_fopen(espfs, filepath);
 		if (file == NULL) {
 			// file not found
 
@@ -140,7 +139,9 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 		// If there are no gzipped files in the image, the code bellow will not cause any harm.
 
 		// Check if requested file was GZIP compressed
-		isGzip = espFsFlags(file) & FLAG_GZIP;
+		espfs_stat_t s = {0};
+		espfs_fstat(file, &s);
+		isGzip = s.flags & ESPFS_FLAG_GZIP;
 		if (isGzip) {
 			// Check the browser's "Accept-Encoding" header. If the client does not
 			// advertise that he accepts GZIP send a warning message (telnet users for e.g.)
@@ -148,7 +149,7 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 			if (!found || (strstr(acceptEncodingBuffer, "gzip") == NULL)) {
 				//No Accept-Encoding: gzip header present
 				httpdSend(connData, gzipNonSupportedMessage, -1);
-				espFsClose(file);
+				espfs_fclose(file);
 				return HTTPD_CGI_DONE;
 			}
 		}
@@ -198,11 +199,11 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 		return HTTPD_CGI_MORE;
 	}
 
-	len=espFsRead(file, buff, FILE_CHUNK_LEN);
+	len=espfs_fread(file, buff, FILE_CHUNK_LEN);
 	if (len>0) httpdSend(connData, buff, len);
 	if (len!=FILE_CHUNK_LEN) {
 		//We're done.
-		espFsClose(file);
+		espfs_fclose(file);
 		return HTTPD_CGI_DONE;
 	} else {
 		//Ok, till next time.
@@ -213,7 +214,7 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 
 static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 {
-	EspFsStat s;
+	espfs_stat_t s;
 	int outlen;
 	if (!espfs)
 	{
@@ -224,7 +225,7 @@ static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 		filepath[0] = '\0';
 		if (connData->cgiArg != NULL) {
 			outlen = strlcpy(filepath, connData->cgiArg, len);
-			if (espFsStat(espfs, filepath, &s) == 0 && s.type == ESPFS_TYPE_FILE) {
+			if (espfs_stat(espfs, filepath, &s) == 0 && s.type == ESPFS_TYPE_FILE) {
 				return outlen;
 			}
 		}
@@ -252,7 +253,7 @@ static size_t getFilepath(HttpdConnData *connData, char *filepath, size_t len)
 	}
 
 	outlen = strlcpy(filepath, ex->basepath, len);
-	if (!espFsStat(espfs, ex->basepath, &s) || s.type == ESPFS_TYPE_DIR) {
+	if (!espfs_stat(espfs, ex->basepath, &s) || s.type == ESPFS_TYPE_DIR) {
 		if (ex->basepath[basepathLen - 1] != '/') {
 			strlcat(filepath, "/", len);
 		}
@@ -285,7 +286,7 @@ typedef enum {
 } TplEncode;
 
 typedef struct {
-	EspFsFile *file;
+	espfs_file_t *file;
 	void *tplArg;
 	char token[64];
 	int tokenPos;
@@ -323,7 +324,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData) {
 	if (connData->isConnectionClosed) {
 		//Connection aborted. Clean up.
 		((TplCallback)(connData->cgiArg2))(connData, NULL, &tpd->tplArg);
-		espFsClose(tpd->file);
+		espfs_fclose(tpd->file);
 		free(tpd);
 		return HTTPD_CGI_DONE;
 	}
@@ -340,7 +341,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData) {
 
 		char filepath[256];
 		getFilepath(connData, filepath, sizeof(filepath));
-		tpd->file = espFsOpen(espfs, filepath);
+		tpd->file = espfs_fopen(espfs, filepath);
 
 		if (tpd->file == NULL) {
 			// maybe a folder, look for index file
@@ -353,9 +354,13 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData) {
 
 		tpd->tplArg=NULL;
 		tpd->tokenPos=-1;
-		if (espFsFlags(tpd->file) & FLAG_GZIP) {
+
+		espfs_stat_t s = {0};
+		espfs_fstat(tpd->file, &s);
+
+		if (s.flags & ESPFS_FLAG_GZIP) {
 			ESP_LOGE(TAG, "cgiEspFsTemplate: Trying to use gzip-compressed file %s as template", connData->url);
-			espFsClose(tpd->file);
+			espfs_fclose(tpd->file);
 			free(tpd);
 			return HTTPD_CGI_NOTFOUND;
 		}
@@ -412,7 +417,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData) {
 		sp = tpd->buff_sp;
 		x = tpd->buff_x;
 	} else {
-		len = espFsRead(tpd->file, buff, FILE_CHUNK_LEN);
+		len = espfs_fread(tpd->file, buff, FILE_CHUNK_LEN);
 		tpd->buff_len = len;
 
 		e = buff;
@@ -530,7 +535,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspFsTemplate(HttpdConnData *connData) {
 		//We're done.
 		((TplCallback)(connData->cgiArg2))(connData, NULL, &tpd->tplArg);
 		ESP_LOGD(TAG, "Template sent");
-		espFsClose(tpd->file);
+		espfs_fclose(tpd->file);
 		free(tpd);
 		return HTTPD_CGI_DONE;
 	} else {

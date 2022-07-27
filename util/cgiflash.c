@@ -10,14 +10,15 @@ Some flash handling cgi routines. Used for updating the ESPFS/OTA image.
 #include "libesphttpd/cgiflash.h"
 
 #include "cJSON.h"
+#include "libesphttpd/cgi_common.h"
 
 #include "httpd-platform.h"
 #ifdef ESP32
-#include "esp32_flash.h"
 #include "esp_ota_ops.h"
 #include "esp_log.h"
 #include "esp_flash_partitions.h"
 #include "esp_image_format.h"
+#include "esp_system.h"      // for esp_restart();
 
 static const char *TAG = "ota";
 #endif
@@ -131,24 +132,7 @@ typedef struct __attribute__((packed)) {
 } OtaHeader;
 #endif
 
-static void cgiJsonResponseCommon(HttpdConnData *connData, cJSON *jsroot){
-	char *json_string = NULL;
 
-	//// Generate the header
-	//We want the header to start with HTTP code 200, which means the document is found.
-	httpdStartResponse(connData, 200);
-	httpdHeader(connData, "Cache-Control", "no-store, must-revalidate, no-cache, max-age=0");
-	httpdHeader(connData, "Expires", "Mon, 01 Jan 1990 00:00:00 GMT");  //  This one might be redundant, since modern browsers look for "Cache-Control".
-	httpdHeader(connData, "Content-Type", "application/json; charset=utf-8"); //We are going to send some JSON.
-	httpdEndHeaders(connData);
-	json_string = cJSON_Print(jsroot);
-    if (json_string)
-    {
-    	httpdSend(connData, json_string, -1);
-        cJSON_free(json_string);
-    }
-    cJSON_Delete(jsroot);
-}
 
 #ifdef ESP32
 CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
@@ -336,7 +320,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 		cJSON_AddBoolToObject(jsroot, "success", (state->state==FLST_DONE)?true:false);
 		free(state);
 
-		cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+		cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 		return HTTPD_CGI_DONE;
 	}
 
@@ -520,7 +504,7 @@ static void ICACHE_FLASH_ATTR resetTimerCb(void *arg) {
 	system_upgrade_flag_set(UPGRADE_FLAG_FINISH);
 	system_upgrade_reboot();
 #else
-	esp32flashRebootIntoOta();
+	esp_restart();
 #endif
 }
 
@@ -542,7 +526,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiRebootFirmware(HttpdConnData *connData) {
 
 	cJSON_AddStringToObject(jsroot, "message", "Rebooting...");
 	cJSON_AddBoolToObject(jsroot, "success", true);
-	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 	return HTTPD_CGI_DONE;
 }
 
@@ -575,7 +559,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiSetBoot(HttpdConnData *connData) {
 	cJSON_AddStringToObject(jsroot, "boot", actual_bootpart->label);
 	cJSON_AddBoolToObject(jsroot, "success", (wanted_bootpart == NULL || wanted_bootpart == actual_bootpart));
 
-	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 	return HTTPD_CGI_DONE;
 }
 
@@ -611,7 +595,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEraseFlash(HttpdConnData *connData) {
 
 	cJSON_AddBoolToObject(jsroot, "success", (err == ESP_OK));
 
-	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 	return HTTPD_CGI_DONE;
 }
 
@@ -751,6 +735,6 @@ CgiStatus ICACHE_FLASH_ATTR cgiGetFlashInfo(HttpdConnData *connData) {
 		esp_partition_iterator_release(it);
 	}
 	cJSON_AddBoolToObject(jsroot, "success", true);
-	cgiJsonResponseCommon(connData, jsroot); // Send the json response!
+	cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 	return HTTPD_CGI_DONE;
 }

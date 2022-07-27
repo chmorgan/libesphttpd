@@ -26,9 +26,11 @@ ESP32 Cgi/template routines for the /wifi url.
 //#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include <esp_log.h>
 
+#include "cJSON.h"
+#include "libesphttpd/cgi_common.h"
 #include <libesphttpd/kref.h>
 
-static const char *TAG = "esp32_cgiwifi";
+static const char *TAG = "cgiwifi";
 /* Enable this to disallow any changes in AP settings. */
 //#define DEMO_MODE
 
@@ -39,6 +41,8 @@ static const char *TAG = "esp32_cgiwifi";
 #define WATCHDOG_TIMEOUT (30 * 1000 / portTICK_PERIOD_MS)
 #define CFG_TICKS (1000 / portTICK_PERIOD_MS)
 #define CFG_DELAY (100 / portTICK_PERIOD_MS)
+
+#define ARGBUFSIZE (16)
 
 /* Jiffy overflow handling stolen from Linux kernel. Needed to check *\
 \* for timeouts.                                                     */
@@ -130,12 +134,6 @@ struct scan_data
     uint16_t num_records;
 };
 
-struct ap_data_iter
-{
-    struct scan_data *data;
-    uint16_t idx;
-};
-
 static volatile atomic_bool scan_in_progress = ATOMIC_VAR_INIT(false);
 static SemaphoreHandle_t data_lock = NULL;
 static struct scan_data *last_scan = NULL;
@@ -144,6 +142,7 @@ static TimerHandle_t *config_timer = NULL;
 
 static void handle_scan_timer(TimerHandle_t timer);
 static void handle_config_timer(TimerHandle_t timer);
+static void cgiwifi_event_handler(void *, esp_event_base_t, int32_t, void *);
 
 /* Initialise data structures. Needs to be called before any other function, *\
 \* including the system event handler.                                       */
@@ -207,6 +206,16 @@ esp_err_t initCgiWifi(void)
         goto err_out;
     }
 
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &cgiwifi_event_handler,
+                                                        NULL,
+                                                        NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &cgiwifi_event_handler,
+                                                        NULL,
+                                                        NULL));
 err_out:
     if (result != ESP_OK)
     {
@@ -248,24 +257,17 @@ err_out:
 \* Must be released via put_scan_data().                               */
 static struct scan_data *get_scan_data(void)
 {
-    struct scan_data *data;
-
+    struct scan_data *data = NULL;
     configASSERT(data_lock != NULL);
-
-    data = NULL;
-    if (data_lock == NULL || last_scan == NULL)
-    {
-        goto err_out;
-    }
-
     if (xSemaphoreTake(data_lock, CFG_DELAY) == pdTRUE)
     {
-        data = last_scan;
-        kref_get(&(data->ref_cnt));
+        if (last_scan != NULL)
+        {
+            data = last_scan;
+            kref_get(&(data->ref_cnt));
+        }
         xSemaphoreGive(data_lock);
     }
-
-err_out:
     return data;
 }
 
@@ -277,6 +279,7 @@ static void free_scan_data(struct kref *ref)
     data = kcontainer_of(ref, struct scan_data, ref_cnt);
     free(data->ap_records);
     free(data);
+    last_scan = NULL;
 }
 
 /* Drop a reference to a scan data set, possibly freeing it. */
@@ -287,8 +290,24 @@ static void put_scan_data(struct scan_data *data)
     kref_put(&(data->ref_cnt), free_scan_data);
 }
 
+/* Clear the AP scan data by Drop the global reference to the scan data set, eventually freeing it. */
+static void clear_global_scan_data(void)
+{
+    configASSERT(data_lock != NULL);
+    if (xSemaphoreTake(data_lock, CFG_DELAY) == pdTRUE)
+    {
+        if (last_scan != NULL)
+        {
+            /* Drop global reference to old data set so it will be freed    *\
+            \* when the last connection using it gets closed.               */
+            put_scan_data(last_scan);
+        }
+        xSemaphoreGive(data_lock);
+    }
+}
+
 /* Fetch the latest AP scan data and make it available. */
-static void wifi_scan_done(system_event_t *event)
+static void wifi_scan_done(wifi_event_sta_scan_done_t *event)
 {
     uint16_t num_aps;
     struct scan_data *old, *new;
@@ -300,10 +319,6 @@ static void wifi_scan_done(system_event_t *event)
     /* cgiWifiSetup() must have been called prior to this point. */
     configASSERT(data_lock != NULL);
 
-    /* Receiving anything other than scan done means something is *\
-    \* really messed up.                                          */
-    configASSERT(event->event_id == SYSTEM_EVENT_SCAN_DONE);
-
     if (atomic_load(&scan_in_progress) == false)
     {
         /* Either scan was cancelled due to timeout or somebody else *\
@@ -313,10 +328,10 @@ static void wifi_scan_done(system_event_t *event)
         return;
     }
 
-    if (event->event_info.scan_done.status != ESP_OK)
+    if (event->status != ESP_OK)
     {
         ESP_LOGI(TAG, "Scan failed. Event status: 0x%x",
-                 event->event_info.scan_done.status);
+                 event->status);
         goto err_out;
     }
 
@@ -452,7 +467,7 @@ static esp_err_t wifi_start_scan(void)
     /* Finally, start a scan. Unless there is one running already. */
     if (atomic_exchange(&scan_in_progress, true) == false)
     {
-        ESP_LOGI(TAG, "[%s] Starting scan.", __FUNCTION__);
+        ESP_LOGI(TAG, "Starting scan.");
 
         memset(&scan_cfg, 0x0, sizeof(scan_cfg));
         scan_cfg.show_hidden = true;
@@ -461,7 +476,7 @@ static esp_err_t wifi_start_scan(void)
         result = esp_wifi_scan_start(&scan_cfg, false);
         if (result == ESP_OK)
         {
-            ESP_LOGI(TAG, "[%s] Starting timer.", __FUNCTION__);
+            ESP_LOGD(TAG, "[%s] Starting timer.", __FUNCTION__);
 
             /* Trigger the timer so scan will be aborted after timeout. */
             xTimerReset(scan_timer, 0);
@@ -475,7 +490,7 @@ static esp_err_t wifi_start_scan(void)
     }
     else
     {
-        ESP_LOGI(TAG, "[%s] Scan already running.", __FUNCTION__);
+        ESP_LOGD(TAG, "[%s] Scan already running.", __FUNCTION__);
         result = ESP_OK;
     }
 
@@ -484,141 +499,119 @@ err_out:
     return result;
 }
 
-/* This CGI is called from the bit of AJAX-code in wifi.tpl. It will       *\
- * initiate a scan for access points and if available will return the      *
- * result of an earlier scan. The result is embedded in a bit of JSON      *
-\* parsed by the javascript in wifi.tpl.                                   */
+/* Get the results of an earler scan in JSON format. . Optionally start a new scan.
+ * See API spec: /README-wifi_api.md
+ */
 CgiStatus cgiWiFiScan(HttpdConnData *connData)
 {
-    struct ap_data_iter *iter;
-    struct scan_data *data;
-    wifi_ap_record_t *record;
-    wifi_mode_t mode;
-    CgiStatus result;
-    int len;
-    char buff[1024];
-
-    result = HTTPD_CGI_DONE;
-    iter = (struct ap_data_iter *)connData->cgiData;
+    cJSON *jsroot = NULL;
 
     if (connData->isConnectionClosed)
     {
-        goto err_out;
+        goto cleanup; // make sure to free memory
     }
 
-    if (esp_wifi_get_mode(&mode) != ESP_OK)
+    if (connData->requestType != HTTPD_METHOD_GET && connData->requestType != HTTPD_METHOD_POST)
     {
-        ESP_LOGE(TAG, "[%s] Error fetching WiFi mode.", __FUNCTION__);
-        goto err_out;
+        return HTTPD_CGI_NOTFOUND;
     }
 
-    /* First call. Send header, fetch scan data and set up iterator. */
-    if (iter == NULL)
+    /* First call. */
+    if (connData->cgiData == NULL) // persistent data stored on connData->cgiData
     {
-        httpdStartResponse(connData, 200);
-        httpdHeader(connData, "Content-Type", "text/json");
-        httpdEndHeaders(connData);
+        // First call to this cgi.
+        bool success = false;
+        jsroot = cJSON_CreateObject();
+        wifi_mode_t mode;
 
-        data = get_scan_data();
-        if (data != NULL)
+        char *allArgs = connData->getArgs;
+        // Make it work with either GET or POST
+        if (connData->requestType == HTTPD_METHOD_POST)
         {
-            iter = calloc(1, sizeof(*iter));
-            if (iter != NULL)
-            {
-                iter->data = data;
-                iter->idx = 0;
-                connData->cgiData = (void *)iter;
-            }
-            else
-            {
-                ESP_LOGE(TAG, "[%s] Iterator allocation failed.", __FUNCTION__);
-                put_scan_data(data);
-            }
+            allArgs = connData->post.buff;
         }
-        else
+        cJSON *jsargs = cJSON_AddObjectToObject(jsroot, "args");
+        char arg_buf[ARGBUFSIZE];
+
+        uint32_t arg_clear = 0;
+        if (cgiGetArgDecU32(allArgs, "clear", &(arg_clear), arg_buf, sizeof(arg_buf)))
         {
-            if (wifi_start_scan() != ESP_OK)
+            cJSON_AddNumberToObject(jsargs, "clear", arg_clear);
+        }
+
+        uint32_t arg_start = 0;
+        if (cgiGetArgDecU32(allArgs, "start", &(arg_start), arg_buf, sizeof(arg_buf)))
+        {
+            cJSON_AddNumberToObject(jsargs, "start", arg_start);
+        }
+
+        if (esp_wifi_get_mode(&mode) != ESP_OK)
+        {
+            const char *err_str = "Error fetching WiFi mode.";
+            ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "error", err_str);
+            goto err_out;
+        }
+
+        if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) /* Skip sending stale AP data if we are in AP mode. */
+        {
+            const char *err_str = "Invalid WiFi mode for scanning.";
+            ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "error", err_str);
+            goto err_out;
+        }
+
+        if (arg_clear != 0)
+        {
+            clear_global_scan_data();
+        }
+        if (arg_start != 0)
+        {
+            if (wifi_start_scan() != ESP_OK) // start a new scan
             {
                 /* Start_scan failed. Tell the user there is an error and don't just keep trying.  */
-                len = sprintf(buff, "{\n \"result\": { \n\"inProgress\": \"ERROR\"\n }\n}\n");
-                httpdSend(connData, buff, len);
+                const char *err_str = "Start scan failed.";
+                ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+                cJSON_AddStringToObject(jsroot, "error", err_str);
                 goto err_out;
             }
         }
-    }
 
-    if (iter == NULL)
-    {
-        /* There is either no scan data available or iterator allocation    *\
-        \* failed. Tell the user we are still trying...                     */
-        len = sprintf(buff, "{\n \"result\": { \n\"inProgress\": \"1\"\n }\n}\n");
-        httpdSend(connData, buff, len);
-    }
-    else
-    {
-        /* We have data to send. Send JSON opening before sending first AP  *\
-        \* data from the list.                                              */
-        if (iter->idx == 0)
+        struct scan_data *scanData = get_scan_data();
+        if (scanData == NULL)
         {
-            len = sprintf(buff, "{\n \"result\": { \n"
-                                "\"inProgress\": \"0\", \n"
-                                "\"APs\": [\n");
-            httpdSend(connData, buff, len);
-        }
-
-        /* Skip sending stale AP data if we are in AP mode. */
-        if (mode == WIFI_MODE_AP)
-        {
-            iter->idx = iter->data->num_records;
-        }
-
-        /* If list is not empty, send current AP element data and advance   *\
-        \* element pointer.                                                 */
-        if (iter->idx < iter->data->num_records)
-        {
-            record = &(iter->data->ap_records[iter->idx]);
-            ++iter->idx;
-
-            len = sprintf(buff, "{\"essid\": \"%s\", "
-                                "\"bssid\": \"" MACSTR "\", "
-                                "\"rssi\": \"%d\", "
-                                "\"enc\": \"%d\", "
-                                "\"channel\": \"%d\"}%s\n",
-                          record->ssid,
-                          MAC2STR(record->bssid),
-                          record->rssi,
-                          record->authmode == WIFI_AUTH_OPEN ? 0 : record->authmode == WIFI_AUTH_WEP ? 1
-                                                                                                     : 2,
-                          record->primary,
-                          iter->idx < iter->data->num_records ? "," : "");
-            httpdSend(connData, buff, len);
-        }
-
-        /* Close JSON statement when all elements have been sent. */
-        if (iter->idx >= iter->data->num_records)
-        {
-            len = sprintf(buff, "]\n}\n}\n");
-            httpdSend(connData, buff, len);
-
-            /* Also start a new scan. */
-            wifi_start_scan();
+            // No scan data available yet. Tell the user we are still trying...
+            success = true;
         }
         else
         {
-            /* Still more data to send... */
-            result = HTTPD_CGI_MORE;
+            // We have data to send.
+            cJSON *jsAps = cJSON_AddArrayToObject(jsroot, "APs");
+            for (int idx = 0; idx < scanData->num_records; idx++)
+            {
+                wifi_ap_record_t *record = &(scanData->ap_records[idx]);
+                cJSON *jsAp = cJSON_CreateObject();
+                char buff[32];
+                cJSON_AddStringToObject(jsAp, "essid", (char *)record->ssid);
+                snprintf((char *)buff, sizeof(buff), MACSTR, MAC2STR(record->bssid)); // convert MAC to string
+                cJSON_AddStringToObject(jsAp, "bssid", buff);
+                cJSON_AddNumberToObject(jsAp, "rssi", record->rssi);
+                cJSON_AddNumberToObject(jsAp, "enc", record->authmode);
+                cJSON_AddNumberToObject(jsAp, "channel", record->primary);
+                cJSON_AddItemToArray(jsAps, jsAp);
+            }
+            success = true;
+            put_scan_data(scanData); // drop reference to scan data
         }
+        //// All done.  Send the results
+    err_out:
+        cJSON_AddBoolToObject(jsroot, "working", atomic_load(&scan_in_progress));
+        cJSON_AddBoolToObject(jsroot, "success", success);
+        cgiJsonResponseHeaders(connData);
     }
 
-err_out:
-    if (result == HTTPD_CGI_DONE && iter != NULL)
-    {
-        put_scan_data(iter->data);
-        free(iter);
-        connData->cgiData = NULL;
-    }
-
-    return result;
+cleanup:
+    return cgiJsonResponseCommonMulti(connData, &connData->cgiData, jsroot); // Send the json response!
 }
 
 /* Helper function to check if WiFi is connected in station mode. */
@@ -927,11 +920,16 @@ static void handle_config_timer(TimerHandle_t timer)
         set_wifi_cfg(&(cfg_state.new));
         cfg_state.state = cfg_state_failed;
         break;
-    case cfg_state_idle:
+
     case cfg_state_connected:
+        // Sync up the state.  This cgiWifi module should work alongside other WiFi management i.e. BlueFi.
+        get_wifi_cfg(&cfg_state.new);
+        cfg_state.new.connect = true; // because we are in the connected state.
+        break;
+    case cfg_state_idle:
     case cfg_state_failed:
         /**
-         * Watchdog to make sure the STA stays connected.  
+         * Watchdog to make sure the STA stays connected.
          * This is useful since ESP-IDF has trouble reconnecting STA sometimes (i.e. you reboot your router).
          * Makes sure that the current WiFi state is consistent with "cfg_state.new".
          * This does not connect STA on Boot-up if WiFi was previously configured, use startCgiWifi() for that.
@@ -978,71 +976,41 @@ err_out:
     return;
 }
 
-static const char *event_names[] = {
-    "WIFI_READY",
-    "SCAN_DONE",
-    "STA_START",
-    "STA_STOP",
-    "STA_CONNECTED",
-    "STA_DISCONNECTED",
-    "STA_AUTHMODE_CHANGE",
-    "STA_GOT_IP",
-    "STA_LOST_IP",
-    "STA_WPS_ER_SUCCESS",
-    "STA_WPS_ER_FAILED",
-    "STA_WPS_ER_TIMEOUT",
-    "STA_WPS_ER_PIN",
-    "AP_START",
-    "AP_STOP",
-    "AP_STACONNECTED",
-    "AP_STADISCONNECTED",
-    "AP_STAIPASSIGNED",
-    "AP_PROBEREQRECVED",
-    "GOT_IP6",
-    "ETH_START",
-    "ETH_STOP",
-    "ETH_CONNECTED",
-    "ETH_DISCONNECTED",
-    "ETH_GOT_IP",
-};
-
-/* Update state information from system events. This function must be   *\
- * called from the main event handler to keep this module updated about *
-\* the current system state.                                            */
-void cgiWifiEventCb(system_event_t *event)
+/* Update state information from system events.    */
+static void cgiwifi_event_handler(void *arg, esp_event_base_t event_base,
+                                  int32_t event_id, void *event_data)
 {
-    ESP_LOGD(TAG, "[%s] Received %s.",
-             __FUNCTION__, event_names[event->event_id]);
-
-    switch (event->event_id)
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
-    case SYSTEM_EVENT_STA_START:
         xEventGroupSetBits(wifi_events, BIT_STA_STARTED);
-        break;
-    case SYSTEM_EVENT_STA_STOP:
+    }
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP)
+    {
         xEventGroupClearBits(wifi_events, BIT_STA_STARTED);
-        break;
-    case SYSTEM_EVENT_SCAN_DONE:
-        wifi_scan_done(event);
-        break;
-    case SYSTEM_EVENT_STA_GOT_IP:
-    case SYSTEM_EVENT_GOT_IP6:
+    }
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE)
+    {
+        wifi_scan_done((wifi_event_sta_scan_done_t *)event_data);
+    }
+    if ((event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) ||
+        (event_base == IP_EVENT && event_id == IP_EVENT_GOT_IP6))
+    {
         xEventGroupSetBits(wifi_events, BIT_CONNECTED);
-        break;
-    case SYSTEM_EVENT_STA_LOST_IP:
-    case SYSTEM_EVENT_STA_DISCONNECTED:
+    }
+    if ((event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) ||
+        (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED))
+    {
         xEventGroupClearBits(wifi_events, BIT_CONNECTED);
-        break;
-    case SYSTEM_EVENT_STA_WPS_ER_SUCCESS:
+    }
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_WPS_ER_SUCCESS)
+    {
         xEventGroupSetBits(wifi_events, BIT_WPS_SUCCESS);
-        break;
-    case SYSTEM_EVENT_STA_WPS_ER_FAILED:
-    case SYSTEM_EVENT_STA_WPS_ER_TIMEOUT:
-    case SYSTEM_EVENT_STA_WPS_ER_PIN:
+    }
+    if ((event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_WPS_ER_FAILED) ||
+        (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_WPS_ER_PIN) ||
+        (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_WPS_ER_TIMEOUT))
+    {
         xEventGroupSetBits(wifi_events, BIT_WPS_FAILED);
-        break;
-    default:
-        break;
     }
 }
 
@@ -1127,6 +1095,10 @@ static esp_err_t update_wifi(struct wifi_cfg_state *cfg, struct wifi_cfg *new, b
             goto err_out;
         }
     }
+    else if (connected)
+    {
+        cfg->state = cfg_state_connected; // clear previous error
+    }
 
 err_out:
     xSemaphoreGive(cfg->lock);
@@ -1192,21 +1164,35 @@ err_out:
 }
 
 /* Trigger a connection attempt to the AP with the given SSID and password. */
+/* Connect WiFi STA.  Use other API /wifi/sta to check status.
+ * See API spec: /README-wifi_api.md
+ */
 CgiStatus cgiWiFiConnect(HttpdConnData *connData)
 {
-    int len;
-    const char *redirect;
-    struct wifi_cfg cfg;
-    wifi_sta_config_t *sta;
-    esp_err_t result;
-
     if (connData->isConnectionClosed)
     {
         /* Connection aborted. Clean up. */
         return HTTPD_CGI_DONE;
     }
 
-    redirect = "wifi.tpl";
+    if (connData->requestType != HTTPD_METHOD_GET && connData->requestType != HTTPD_METHOD_POST)
+    {
+        return HTTPD_CGI_NOTFOUND;
+    }
+
+    // Pointer to the args, could be either from GET or POST
+    char *allArgs = connData->getArgs;
+    if (connData->requestType == HTTPD_METHOD_POST)
+    {
+        allArgs = connData->post.buff;
+    }
+
+    int len;
+    char arg_buf[ARGBUFSIZE];
+    struct wifi_cfg cfg;
+    esp_err_t result;
+    cJSON *jsroot = cJSON_CreateObject();
+
     memset(&cfg, 0x0, sizeof(cfg));
 
     /* We are only changing SSID and password, so fetch the current *\
@@ -1214,26 +1200,30 @@ CgiStatus cgiWiFiConnect(HttpdConnData *connData)
     result = get_wifi_cfg(&cfg);
     if (result != ESP_OK)
     {
-        ESP_LOGE(TAG, "[%s] Error fetching WiFi config.", __FUNCTION__);
+        const char *err_str = "Error fetching WiFi config.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
         goto err_out;
     }
 
-    sta = &(cfg.sta.sta);
-    len = httpdFindArg(connData->post.buff, "essid",
-                       (char *)&(sta->ssid), sizeof(sta->ssid));
-    if (len <= 1)
+    wifi_sta_config_t *sta = &(cfg.sta.sta);
+    cJSON *jsargs = cJSON_AddObjectToObject(jsroot, "args");
+    len = httpdFindArg(allArgs, "ssid", arg_buf, sizeof(arg_buf));
+    if (len > 0)
     {
-        ESP_LOGE(TAG, "[%s] essid invalid or missing.", __FUNCTION__);
-        goto err_out;
+        strlcpy((char *)&(sta->ssid), arg_buf, sizeof(sta->ssid));
+        cJSON_AddStringToObject(jsargs, "ssid", (char *)sta->ssid);
     }
 
-    len = httpdFindArg(connData->post.buff, "passwd",
-                       (char *)&(sta->password), sizeof(sta->password));
-    if (len <= 1)
+    len = httpdFindArg(allArgs, "pass", arg_buf, sizeof(arg_buf));
+    if (len > 0)
     {
-        /* FIXME: What about unsecured APs? */
-        ESP_LOGE(TAG, "[%s] Password parameter missing.", __FUNCTION__);
-        goto err_out;
+        strlcpy((char *)&(sta->password), arg_buf, sizeof(sta->password));
+        cJSON_AddStringToObject(jsargs, "pass", (char *)sta->password);
+    }
+    else
+    {
+        sta->password[0] = 0; // empty password
     }
 
     /* And of course we want to actually connect to the AP. */
@@ -1244,110 +1234,164 @@ CgiStatus cgiWiFiConnect(HttpdConnData *connData)
              sta->ssid, sta->password);
 
     result = update_wifi(&cfg_state, &cfg, false);
-    if (result == ESP_OK)
+    if (result != ESP_OK)
     {
-        redirect = "connecting.html";
+        const char *err_str = "Setting WiFi config failed.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
+        goto err_out;
     }
 #else
-    ESP_LOGI(TAG, "Demo mode, not actually connecting to AP %s pw %s",
-             sta->ssid, sta->password);
+    {
+        const char *err_str = "Demo mode, not actually connecting to AP.";
+        ESP_LOGW(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "demo", err_str);
+        result = ESP_OK; // fake OK status for demo
+    }
 #endif
 
 err_out:
-    httpdRedirect(connData, redirect);
-    return HTTPD_CGI_DONE;
+    cJSON_AddBoolToObject(jsroot, "success", (result == ESP_OK));
+    return cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 }
 
-/* CGI used to set the WiFi mode. */
+/* CGI used to get/set the WiFi mode.  See enum wifi_mode_t for the values.
+ * See API spec: /README-wifi_api.md
+ */
 CgiStatus cgiWiFiSetMode(HttpdConnData *connData)
 {
-    int len;
-    wifi_mode_t mode;
-    struct wifi_cfg cfg;
-    char buff[16];
-    esp_err_t result;
-
     if (connData->isConnectionClosed)
     {
         /* Connection aborted. Clean up. */
         return HTTPD_CGI_DONE;
     }
 
-    len = httpdFindArg(connData->getArgs, "mode", buff, sizeof(buff));
-    if (len != 0)
+    if (connData->requestType != HTTPD_METHOD_GET && connData->requestType != HTTPD_METHOD_POST)
     {
-        errno = 0;
-        mode = strtoul(buff, NULL, 10);
-        if (errno != 0 || mode < WIFI_MODE_NULL || mode >= WIFI_MODE_MAX)
+        return HTTPD_CGI_NOTFOUND;
+    }
+
+    // Pointer to the args, could be either from GET or POST
+    char *allArgs = connData->getArgs;
+    if (connData->requestType == HTTPD_METHOD_POST)
+    {
+        allArgs = connData->post.buff;
+    }
+
+    struct wifi_cfg cfg;
+    esp_err_t result = ESP_OK;
+    cJSON *jsroot = cJSON_CreateObject();
+
+    // Get current mode.
+    memset(&cfg, 0x0, sizeof(cfg));
+    result = get_wifi_cfg(&cfg);
+    if (result != ESP_OK)
+    {
+        const char *err_str = "Error fetching current WiFi config.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
+        goto err_out;
+    }
+
+    char arg_buf[ARGBUFSIZE];
+    cJSON *jsargs = cJSON_AddObjectToObject(jsroot, "args");
+
+    uint32_t arg_force = 0;
+    if (cgiGetArgDecU32(allArgs, "force", &(arg_force), arg_buf, sizeof(arg_buf)))
+    {
+        cJSON_AddNumberToObject(jsargs, "force", arg_force);
+    }
+    // Setting a new mode?
+    wifi_mode_t new_mode;
+    if (cgiGetArgDecU32(allArgs, "mode", &new_mode, arg_buf, sizeof(arg_buf)))
+    {
+        cJSON_AddNumberToObject(jsargs, "mode", new_mode);
+        if (new_mode < WIFI_MODE_NULL || new_mode >= WIFI_MODE_MAX)
         {
-            ESP_LOGE(TAG, "[%s] Invalid WiFi mode: %d", __FUNCTION__, mode);
+            const char *err_str = "Invalid WiFi mode.";
+            ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "error", err_str);
+            result = -1;
             goto err_out;
         }
+
+        /* Do not switch to STA mode without being connected to an AP. (Unless &force=1) */
+        if (new_mode == WIFI_MODE_STA && cfg.mode == WIFI_MODE_APSTA && !sta_connected() && arg_force == 0)
+        {
+            const char *err_str = "No connection to AP, not switching to client-only mode.";
+            ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "error", err_str);
+            result = -1;
+            goto err_out;
+        }
+
+        cfg.mode = new_mode;
 
 #ifndef DEMO_MODE
-        memset(&cfg, 0x0, sizeof(cfg));
-
-        result = get_wifi_cfg(&cfg);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Error fetching current WiFi config.",
-                     __FUNCTION__);
-            goto err_out;
-        }
-
-        /* Do not switch to STA mode without being connected to an AP. */
-        if (mode == WIFI_MODE_STA && !sta_connected())
-        {
-            ESP_LOGE(TAG, "[%s] No connection to AP, not switching to "
-                          "client-only mode.",
-                     __FUNCTION__);
-            goto err_out;
-        }
-
-        cfg.mode = mode;
-
-        ESP_LOGI(TAG, "[%s] Switching to WiFi mode %s", __FUNCTION__, wifi_mode_names[mode]);
+        ESP_LOGI(TAG, "[%s] Switching to WiFi mode %s", __FUNCTION__, wifi_mode_names[new_mode]);
 
         result = update_wifi(&cfg_state, &cfg, false);
         if (result != ESP_OK)
         {
-            ESP_LOGE(TAG, "[%s] Setting WiFi config failed", __FUNCTION__);
+            const char *err_str = "Setting WiFi config failed.";
+            ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "error", err_str);
+            goto err_out;
         }
 #else
-        ESP_LOGI(TAG, "[%s] Demo mode, not switching to WiFi mode %s", __FUNCTION__, wifi_mode_names[mode]);
+        {
+            const char *err_str = "Demo mode, not switching WiFi mode.";
+            ESP_LOGW(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "demo", err_str);
+            result = ESP_OK; // fake OK status for demo
+        }
 #endif
     }
+    // else no mode argument, just return the current mode
+
+    cJSON_AddNumberToObject(jsroot, "mode", cfg.mode);
+    cJSON_AddStringToObject(jsroot, "mode_str", wifi_mode_names[cfg.mode]);
 
 err_out:
-    httpdRedirect(connData, "working.html"); // changing mode takes some time, so redirect user to wait
-    return HTTPD_CGI_DONE;
+    // changing mode takes some time, so indicate user to wait
+    cJSON_AddBoolToObject(jsroot, "success", (result == ESP_OK));
+    return cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 }
 
 /* CGI for triggering a WPS push button connection attempt. */
 CgiStatus cgiWiFiStartWps(HttpdConnData *connData)
 {
-    struct wifi_cfg cfg;
-    esp_err_t result;
-
-    result = ESP_OK;
-
     if (connData->isConnectionClosed)
     {
         /* Connection aborted. Clean up. */
         return HTTPD_CGI_DONE;
     }
 
+    if (connData->requestType != HTTPD_METHOD_GET && connData->requestType != HTTPD_METHOD_POST)
+    {
+        return HTTPD_CGI_NOTFOUND;
+    }
+
+    struct wifi_cfg cfg;
+    esp_err_t result = ESP_OK;
+    cJSON *jsroot = cJSON_CreateObject();
+
     /* Make sure we are not in the middle of setting a new WiFi config. */
     if (xSemaphoreTake(cfg_state.lock, CFG_DELAY) != pdTRUE)
     {
-        ESP_LOGE(TAG, "[%s] Error taking mutex.", __FUNCTION__);
-        httpdRedirect(connData, "wifi.tpl");
-        return HTTPD_CGI_DONE;
+        const char *err_str = "Error taking mutex.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
+        result = -1;
+        goto err_out;
     }
 
     if (cfg_state.state > cfg_state_idle)
     {
-        ESP_LOGI(TAG, "[%s] Already connecting.", __FUNCTION__);
+        const char *err_str = "Already connecting.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
+        result = -1;
         goto err_out;
     }
 
@@ -1358,7 +1402,9 @@ CgiStatus cgiWiFiStartWps(HttpdConnData *connData)
     result = get_wifi_cfg(&cfg);
     if (result != ESP_OK)
     {
-        ESP_LOGE(TAG, "[%s] Error fetching WiFi config.", __FUNCTION__);
+        const char *err_str = "Error fetching WiFi config.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
         goto err_out;
     }
 
@@ -1368,42 +1414,70 @@ CgiStatus cgiWiFiStartWps(HttpdConnData *connData)
     if (xTimerChangePeriod(config_timer, CFG_DELAY, CFG_DELAY) != pdTRUE)
     {
         cfg_state.state = cfg_state_failed;
+        result = -1;
+        goto err_out;
     }
 #else
-    ESP_LOGI(TAG, "[%s] Demo mode, not starting WPS.", __FUNCTION__);
+    {
+        const char *err_str = "Demo mode, not starting WPS.";
+        ESP_LOGW(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "demo", err_str);
+        result = ESP_OK; // fake OK status for demo
+    }
 #endif
 
 err_out:
     xSemaphoreGive(cfg_state.lock);
-    httpdRedirect(connData, "connecting.html");
-
-    return HTTPD_CGI_DONE;
+    cJSON_AddBoolToObject(jsroot, "success", (result == ESP_OK));
+    return cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 }
 
-/* CGI for settings in AP mode. */
+/* CGI for get/set settings in AP mode.
+ * See API spec: /README-wifi_api.md
+ */
 CgiStatus cgiWiFiAPSettings(HttpdConnData *connData)
 {
-    int len;
-    char buff[64];
-
-    esp_err_t result;
-
     if (connData->isConnectionClosed)
     {
+        /* Connection aborted. Clean up. */
         return HTTPD_CGI_DONE;
     }
 
+    if (connData->requestType != HTTPD_METHOD_GET && connData->requestType != HTTPD_METHOD_POST)
+    {
+        return HTTPD_CGI_NOTFOUND;
+    }
+
+    // Pointer to the args, could be either from GET or POST
+    char *allArgs = connData->getArgs;
+    if (connData->requestType == HTTPD_METHOD_POST)
+    {
+        allArgs = connData->post.buff;
+    }
+
+    char arg_buf[ARGBUFSIZE];
+    esp_err_t result = ESP_OK;
+    cJSON *jsroot = cJSON_CreateObject();
+
+    // Get the current settings
+    struct wifi_cfg cfg;
+    result = get_wifi_cfg(&cfg);
+    if (result != ESP_OK)
+    {
+        const char *err_str = "Error fetching WiFi config.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
+        goto err_out;
+    }
+
+    // Get the args
     bool has_arg_chan = false;
     unsigned int chan;
-    len = httpdFindArg(connData->post.buff, "chan", buff, sizeof(buff));
-    if (len > 0)
+    if (cgiGetArgDecU32(allArgs, "chan", &chan, arg_buf, sizeof(arg_buf)))
     {
-        errno = 0;
-        chan = strtoul(buff, NULL, 10);
-        if (errno != 0 || chan < 1 || chan > 15)
+        if (chan < 1 || chan > 15)
         {
-            ESP_LOGW(TAG, "[%s] Not setting invalid channel %s",
-                     __FUNCTION__, buff);
+            ESP_LOGW(TAG, "[%s] Invalid channel %s", __FUNCTION__, arg_buf);
         }
         else
         {
@@ -1413,356 +1487,165 @@ CgiStatus cgiWiFiAPSettings(HttpdConnData *connData)
 
     bool has_arg_ssid = false;
     char ssid[32]; /**< SSID of ESP32 soft-AP */
-    len = httpdFindArg(connData->post.buff, "ssid", buff, sizeof(buff));
-    if (len > 0)
+    if (cgiGetArgString(allArgs, "ssid", ssid, sizeof(ssid)))
     {
-        int n;
-        n = sscanf(buff, "%s", (char *)&ssid); // find a string without spaces
-        if (n == 1)
-        {
-            has_arg_ssid = true;
-        }
-        else
-        {
-            ESP_LOGW(TAG, "[%s] Not setting invalid ssid %s",
-                     __FUNCTION__, buff);
-        }
+        has_arg_ssid = true;
     }
 
     bool has_arg_pass = false;
     char pass[64]; /**< Password of ESP32 soft-AP */
-    len = httpdFindArg(connData->post.buff, "pass", buff, sizeof(buff));
-    if (len > 0)
+    if (cgiGetArgString(allArgs, "pass", pass, sizeof(pass)))
     {
-        int n;
-        n = sscanf(buff, "%s", (char *)&pass); // find a string without spaces
-        if (n == 1)
-        {
-            has_arg_pass = true;
-        }
-        else
-        {
-            ESP_LOGW(TAG, "[%s] Not setting invalid pass %s",
-                     __FUNCTION__, buff);
-        }
+
+        has_arg_pass = true;
     }
 
+    // Do the command
+    if (has_arg_chan)
+    {
+        ESP_LOGI(TAG, "[%s] Setting ch=%d", __FUNCTION__, chan);
+        cfg.ap.ap.channel = (uint8)chan;
+    }
+    cJSON_AddNumberToObject(jsroot, "chan", cfg.ap.ap.channel);
+
+    if (has_arg_ssid)
+    {
+        ESP_LOGI(TAG, "[%s] Setting ssid=%s", __FUNCTION__, ssid);
+        strlcpy((char *)cfg.ap.ap.ssid, ssid, sizeof(cfg.ap.ap.ssid));
+        cfg.ap.ap.ssid_len = 0; // if ssid_len==0, check the SSID until there is a termination character; otherwise, set the SSID length according to softap_config.ssid_len.
+    }
+    cJSON_AddStringToObject(jsroot, "ssid", (char *)cfg.ap.ap.ssid);
+
+    if (has_arg_pass)
+    {
+        ESP_LOGI(TAG, "[%s] Setting pass=%s", __FUNCTION__, pass);
+        strlcpy((char *)cfg.ap.ap.password, pass, sizeof(cfg.ap.ap.password));
+    }
+    cJSON_AddStringToObject(jsroot, "pass", (char *)cfg.ap.ap.password);
+
+    bool enabled = cfg.mode == WIFI_MODE_AP || cfg.mode == WIFI_MODE_APSTA;
+    cJSON_AddBoolToObject(jsroot, "enabled", enabled);
+
+    // Only commit the change if one or more args is passed.  Otherwise just return the current settings.
     if (has_arg_chan || has_arg_ssid || has_arg_pass)
     {
 #ifndef DEMO_MODE
-        struct wifi_cfg cfg;
-        result = get_wifi_cfg(&cfg);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Fetching WiFi config failed", __FUNCTION__);
-            goto err_out;
-        }
-
-        if (has_arg_chan)
-        {
-            ESP_LOGI(TAG, "[%s] Setting ch=%d", __FUNCTION__, chan);
-            cfg.ap.ap.channel = (uint8)chan;
-        }
-
-        if (has_arg_ssid)
-        {
-            ESP_LOGI(TAG, "[%s] Setting ssid=%s", __FUNCTION__, ssid);
-            strlcpy((char *)cfg.ap.ap.ssid, ssid, sizeof(cfg.ap.ap.ssid));
-            cfg.ap.ap.ssid_len = 0; // if ssid_len==0, check the SSID until there is a termination character; otherwise, set the SSID length according to softap_config.ssid_len.
-            ESP_LOGI(TAG, "[%s] Set ssid=%s", __FUNCTION__, cfg.ap.ap.ssid);
-        }
-
-        if (has_arg_pass)
-        {
-            ESP_LOGI(TAG, "[%s] Setting pass=%s", __FUNCTION__, pass);
-            strlcpy((char *)cfg.ap.ap.password, pass, sizeof(cfg.ap.ap.password));
-        }
-
         result = update_wifi(&cfg_state, &cfg, false);
         if (result != ESP_OK)
         {
             ESP_LOGE(TAG, "[%s] Setting WiFi config failed", __FUNCTION__);
         }
 #else
-        ESP_LOGI(TAG, "[%s] Demo mode, not setting ch=%d", __FUNCTION__, chan);
+        {
+            const char *err_str = "Demo mode, not changing AP settings.";
+            ESP_LOGW(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "demo", err_str);
+            result = ESP_OK; // fake OK status for demo
+        }
 #endif
     }
 
 err_out:
-    httpdRedirect(connData, "working.html");
-    return HTTPD_CGI_DONE;
+    cJSON_AddBoolToObject(jsroot, "success", (result == ESP_OK));
+    return cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 }
 
-/* CGI returning the current state of the WiFi connection. */
+/* CGI returning the current state of the WiFi STA connection to an AP.
+ * See API spec: /README-wifi_api.md
+ */
 CgiStatus cgiWiFiConnStatus(HttpdConnData *connData)
 {
-    char buff[128];
-    tcpip_adapter_ip_info_t info;
-    esp_err_t result;
-
     if (connData->isConnectionClosed)
     {
+        /* Connection aborted. Clean up. */
         return HTTPD_CGI_DONE;
     }
 
-    snprintf(buff, sizeof(buff) - 1, "{\n \"status\": \"fail\"\n }\n");
-
-    switch (cfg_state.state)
+    if (connData->requestType != HTTPD_METHOD_GET)
     {
-    case cfg_state_idle:
-        snprintf(buff, sizeof(buff) - 1, "{\n \"status\": \"idle\"\n }\n");
-        break;
-    case cfg_state_update:
-    case cfg_state_connecting:
-    case cfg_state_wps_start:
-    case cfg_state_wps_active:
-        snprintf(buff, sizeof(buff) - 1, "{\n \"status\": \"working\"\n }\n");
-        break;
-    case cfg_state_connected:
-        result = tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &info);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Error fetching IP config.", __FUNCTION__);
-            goto err_out;
-        }
-        snprintf(buff, sizeof(buff) - 1,
-                 "{\n \"status\": \"success\",\n \"ip\": \"%s\" }\n",
-                 ip4addr_ntoa(&(info.ip)));
-        break;
-    case cfg_state_failed:
-    default:
-        break;
+        return HTTPD_CGI_NOTFOUND;
     }
 
-    httpdStartResponse(connData, 200);
-    httpdHeader(connData, "Content-Type", "text/json");
-    httpdEndHeaders(connData);
-    httpdSend(connData, buff, -1);
-    return HTTPD_CGI_DONE;
+    esp_err_t result = ESP_OK;
+    cJSON *jsroot = cJSON_CreateObject();
+    struct wifi_cfg cfg;
 
-err_out:
-    ESP_LOGE(TAG, "[%s] Failed.", __FUNCTION__);
-    httpdStartResponse(connData, 500);
-    httpdEndHeaders(connData);
-
-    return HTTPD_CGI_DONE;
-}
-
-/* Template code for the WiFi page. */
-CgiStatus tplWlan(HttpdConnData *connData, char *token, void **arg)
-{
-    char buff[600];
-    wifi_ap_record_t stcfg;
-    wifi_mode_t mode;
-    esp_err_t result;
-
-    if (token == NULL)
+    memset(&cfg, 0x0, sizeof(cfg));
+    result = get_wifi_cfg(&cfg);
+    if (result != ESP_OK)
     {
+        const char *err_str = "Error fetching WiFi config.";
+        ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+        cJSON_AddStringToObject(jsroot, "error", err_str);
         goto err_out;
     }
+    bool working = false;
 
-    memset(buff, 0x0, sizeof(buff));
+    bool enabled = cfg.mode == WIFI_MODE_STA || cfg.mode == WIFI_MODE_APSTA;
+    wifi_sta_config_t *sta = &(cfg.sta.sta);
+    cJSON_AddStringToObject(jsroot, "ssid", (char *)sta->ssid);
+    cJSON_AddStringToObject(jsroot, "pass", (char *)sta->password);
+    cJSON_AddBoolToObject(jsroot, "enabled", enabled);
 
-    if (!strcmp(token, "WiFiMode"))
+    if (!enabled)
     {
-        result = esp_wifi_get_mode(&mode);
-        if (result != ESP_OK)
+        cJSON_AddStringToObject(jsroot, "error", "STA disabled");
+    }
+    else
+    {
+        switch (cfg_state.state)
         {
-            goto err_out;
-        }
-
-        switch (mode)
-        {
-        case WIFI_MODE_STA:
-            strlcpy(buff, "STA (Client Only)", sizeof(buff));
+        case cfg_state_idle:
+            // working = false;
             break;
-        case WIFI_MODE_AP:
-            strlcpy(buff, "AP (Access Point Only)", sizeof(buff));
+        case cfg_state_update:
+        case cfg_state_connecting:
+        case cfg_state_wps_start:
+        case cfg_state_wps_active:
+            working = true;
             break;
-        case WIFI_MODE_APSTA:
-            strlcpy(buff, "STA+AP", sizeof(buff));
+        case cfg_state_connected:
+            // working = false;
             break;
+        case cfg_state_failed:
         default:
-            strlcpy(buff, "Disabled", sizeof(buff));
+            cJSON_AddStringToObject(jsroot, "error", "cfg_state_failed");
+            // working = false;
             break;
         }
     }
-    else if (!strcmp(token, "currSsid"))
-    {
+    cJSON_AddBoolToObject(jsroot, "working", working);
 
-        wifi_config_t cfg;
-        //if(sta_connected()){
-        result = esp_wifi_get_config(WIFI_IF_STA, &cfg);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Error fetching STA config.", __FUNCTION__);
-            goto err_out;
-        }
-        strlcpy(buff, (char *)cfg.sta.ssid, sizeof(buff));
-        //}
-    }
-    else if (!strcmp(token, "WiFiPasswd"))
+    bool connected = sta_connected();
+    if (connected)
     {
-        wifi_config_t cfg;
-        //if(sta_connected()){
-        result = esp_wifi_get_config(WIFI_IF_STA, &cfg);
-        if (result != ESP_OK)
+        esp_netif_t *netif_sta = NULL;
+        esp_netif_ip_info_t sta_ip_info;
+        char ip_str_buf[IP4ADDR_STRLEN_MAX];
+        char *ip_str = NULL;
+        netif_sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif_sta != NULL && esp_netif_get_ip_info(netif_sta, &sta_ip_info) == ESP_OK)
         {
-            ESP_LOGE(TAG, "[%s] Error fetching STA config.", __FUNCTION__);
+            ip_str = ip4addr_ntoa_r((ip4_addr_t *)&sta_ip_info.ip, ip_str_buf, sizeof(ip_str_buf));
+        }
+        if (ip_str != NULL)
+        {
+            cJSON_AddStringToObject(jsroot, "ip", ip_str); // AddString duplicates the string, so ok to use buffer on stack
+        }
+        else
+        {
+            const char *err_str = "Error fetching IP config.";
+            ESP_LOGE(TAG, "[%s] %s", __FUNCTION__, err_str);
+            cJSON_AddStringToObject(jsroot, "error", err_str);
             goto err_out;
-        }
-        strlcpy(buff, (char *)cfg.sta.password, sizeof(buff));
-        //}
-    }
-    else if (!strcmp(token, "ApSsid"))
-    {
-        wifi_config_t cfg;
-        result = esp_wifi_get_config(WIFI_IF_AP, &cfg);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Error fetching AP config.", __FUNCTION__);
-            goto err_out;
-        }
-        strlcpy(buff, (char *)cfg.ap.ssid, sizeof(buff));
-    }
-    else if (!strcmp(token, "ApPass"))
-    {
-        wifi_config_t cfg;
-        result = esp_wifi_get_config(WIFI_IF_AP, &cfg);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Error fetching AP config.", __FUNCTION__);
-            goto err_out;
-        }
-        strlcpy(buff, (char *)cfg.ap.password, sizeof(buff));
-    }
-    else if (!strcmp(token, "ApChan"))
-    {
-        wifi_config_t cfg;
-        result = esp_wifi_get_config(WIFI_IF_AP, &cfg);
-        if (result != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[%s] Error fetching AP config.", __FUNCTION__);
-            goto err_out;
-        }
-        snprintf(buff, sizeof(buff), "%d", cfg.ap.channel);
-    }
-    else if (!strcmp(token, "ModeWarn"))
-    {
-        result = esp_wifi_get_mode(&mode);
-        if (result != ESP_OK)
-        {
-            goto err_out;
-        }
-
-        switch (mode)
-        {
-        case WIFI_MODE_AP:
-            /* In AP mode we do not offer switching to STA-only mode.   *\
-             * This should minimise the risk of the system connecting   *
-             * to an AP the user can not access and thereby losing      *
-             * control of the device. By forcing them to go through the *
-             * AP+STA mode, the user will always be able to rescue the  *
-             * situation via the AP interface.                          *
-             * Maybe we should also implement an aknowledge mechanism,  *
-             * where the user will have to load a certain URL within    *
-             * x minutes after switching to STA mode, otherwise the     *
-            \* device will fall back to the previous configuration.     */
-            snprintf(buff, sizeof(buff) - 1,
-                     "<p><button onclick=\"location.href='setmode.cgi?mode=%d'\">Go to <b>AP+STA</b> mode</button> (Both AP and Client)</p>",
-                     WIFI_MODE_APSTA);
-            break;
-        case WIFI_MODE_APSTA:
-            snprintf(buff, sizeof(buff) - 1,
-                     "<p><button onclick=\"location.href='setmode.cgi?mode=%d'\">Go to standalone <b>AP</b> mode</button> (Access Point Only)</p>",
-                     WIFI_MODE_AP);
-
-            /* Only offer switching to STA mode if we have a connection. */
-            if (sta_connected())
-            {
-                snprintf(buff + strlen(buff), sizeof(buff) - strlen(buff) - 1,
-                         "<p><button onclick=\"location.href='setmode.cgi?mode=%d'\">Go to standalone <b>STA</b> mode</button> (Client Only)</p>",
-                         WIFI_MODE_STA);
-            }
-            break;
-        case WIFI_MODE_STA:
-        default:
-            snprintf(buff, sizeof(buff) - 1,
-                     "<p><button onclick=\"location.href='setmode.cgi?mode=%d'\">Go to standalone <b>AP</b> mode</button> (Access Point Only)</p>"
-                     "<p><button onclick=\"location.href='setmode.cgi?mode=%d'\">Go to <b>AP+STA</b> mode</button> (Both AP and Client)</p>",
-                     WIFI_MODE_AP, WIFI_MODE_APSTA);
-            break;
-        }
-
-        /* Always offer WPS. */
-        snprintf(buff + strlen(buff), sizeof(buff) - strlen(buff) - 1,
-                 "<p><button onclick=\"location.href='startwps.cgi'\">Connect to AP with <b>WPS</b></button> "
-                 "This will switch to AP+STA mode. You can switch to STA only mode "
-                 "after the client has connected.</p>");
-
-        /* Disable WiFi.  (only available if Eth connected?) */
-        if (1)
-        { //eth_connected()){
-            snprintf(buff + strlen(buff), sizeof(buff) - strlen(buff) - 1,
-                     "<p><button onclick=\"location.href='setmode.cgi?mode=%d'\">Disable WiFi</button> "
-                     "This option may leave you unable to connect!"
-                     " (unless via Ethernet.) </p>",
-                     WIFI_MODE_NULL);
-        }
-    }
-    else if (!strcmp(token, "StaWarn"))
-    {
-        result = esp_wifi_get_mode(&mode);
-        if (result != ESP_OK)
-        {
-            goto err_out;
-        }
-
-        switch (mode)
-        {
-        case WIFI_MODE_STA:
-        case WIFI_MODE_APSTA:
-            result = esp_wifi_sta_get_ap_info(&stcfg);
-            if (result != ESP_OK)
-            {
-                snprintf(buff, sizeof(buff) - 1, "STA is <b>not connected</b>.");
-            }
-            else
-            {
-                snprintf(buff, sizeof(buff) - 1, "STA is connected to: <b>%s</b>", (char *)stcfg.ssid);
-            }
-            break;
-        case WIFI_MODE_AP:
-        default:
-            snprintf(buff, sizeof(buff) - 1, "Warning: STA Disabled! "
-                                             "<b>Can't scan in this mode.</b>");
-            break;
-        }
-    }
-    else if (!strcmp(token, "ApWarn"))
-    {
-        result = esp_wifi_get_mode(&mode);
-        if (result != ESP_OK)
-        {
-            goto err_out;
-        }
-
-        switch (mode)
-        {
-        case WIFI_MODE_AP:
-        case WIFI_MODE_APSTA:
-            break;
-        case WIFI_MODE_STA:
-        default:
-            snprintf(buff, sizeof(buff) - 1, "Warning: AP Disabled!  Save AP Settings will have no effect.");
-            break;
         }
     }
 
-    httpdSend(connData, buff, -1);
+    cJSON_AddBoolToObject(jsroot, "connected", connected);
 
 err_out:
-    return HTTPD_CGI_DONE;
+    cJSON_AddBoolToObject(jsroot, "success", (result == ESP_OK));
+    return cgiJsonResponseCommonSingle(connData, jsroot); // Send the json response!
 }
 
 #endif // ESP32

@@ -15,7 +15,6 @@ CgiStatus cgiWiFiConnStatus(HttpdConnData *connData);
 #include <esp_event.h>
 esp_err_t initCgiWifi(void);
 esp_err_t startCgiWifi(void);
-void cgiWifiEventCb(system_event_t *event);
 CgiStatus cgiWiFiStartWps(HttpdConnData *connData);
 #endif
 

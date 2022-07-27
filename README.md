@@ -111,11 +111,9 @@ of a DNS-server (started by calling `captdnsInit()`) resolving all hostnames int
 ESP8266/ESP32. These redirect functions can then be used to further redirect the client to the hostname of 
 the ESP8266/ESP32.
 
-* Flash updating functions (OTA) - see [README-flash_api](./README-flash_api.md)
+* __Flash updating functions (OTA)__ - see [README-flash_api](./README-flash_api.md)
 
-* __cgiWiFi* functions__ (arg: various)
-These are used to change WiFi mode, scan for access points, associate to an access point etcetera. See
-the example projects for an implementation that uses this function call.  [FreeRTOS Example](https://github.com/chmorgan/esphttpd-freertos)
+* __WiFi settings functions__ - see [README-wifi_api.md](./README-wifi_api.md)
 
 * __cgiWebsocket__ (arg: connect function)
 This CGI is used to set up a websocket. Websockets are described later in this document.  See

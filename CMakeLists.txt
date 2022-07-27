@@ -4,12 +4,12 @@ set (libesphttpd_SOURCES "core/auth.c"
                          "core/sha1.c"
                          "core/libesphttpd_base64.c"
                          "util/captdns.c"
+                         "util/cgi_common.c"
                          "util/cgiflash.c"
                          "util/cgiredirect.c"
                          "util/cgiwebsocket.c"
                          "util/cgiwifi.c"
                          "util/cgiredirect.c"
-                         "util/esp32_flash.c"
                          "util/esp32_httpd_vfs.c"
                          "util/esp32_wifi.c")
 

@@ -21,7 +21,7 @@ static const char* TAG = "captdns";
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-#include "tcpip_adapter.h"
+#include "esp_netif.h"
 #else
 #include "FreeRTOS.h"
 #include "task.h"
@@ -234,8 +234,8 @@ static void ICACHE_FLASH_ATTR captdnsRecv(struct sockaddr_in *premote_addr, char
 			setn16(&rf->rdlength, 4); //IPv4 addr is 4 bytes;
 			//Grab the current IP of the softap interface
 #ifdef ESP32
-            tcpip_adapter_ip_info_t info;
-            tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &info);
+			esp_netif_ip_info_t info;
+    		esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"), &info);
 #else
 			struct ip_info info;
 			wifi_get_ip_info(SOFTAP_IF, &info);

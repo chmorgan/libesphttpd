@@ -18,6 +18,7 @@ ESP32 Cgi/template routines for the /wifi url.
 #include <freertos/timers.h>
 
 #include <esp_event.h>
+#include <lwip/inet.h>
 #include <esp_wifi.h>
 #include <esp_wifi_types.h>
 #include <esp_wps.h>

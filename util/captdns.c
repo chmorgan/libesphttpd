@@ -301,13 +301,7 @@ static void captdnsTask(void *pvParameters) {
 	int32 ret;
 	struct sockaddr_in from;
 	socklen_t fromlen;
-#ifdef ESP32
-    tcpip_adapter_ip_info_t ipconfig;
-#else
-	struct ip_info ipconfig;
-#endif
 
-	memset(&ipconfig, 0, sizeof(ipconfig));
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = INADDR_ANY;

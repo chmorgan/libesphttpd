@@ -45,7 +45,7 @@ static espfs_file_t *tryOpenIndex_do(const char *path, const char *indexname) {
 	bool needSlash = false;
 
 	// will we need to append a slash?
-	if(path[url_len - 1] != '/') {
+	if((url_len > 0) && (path[url_len - 1] != '/')) {
 		url_len++;
 		needSlash = true;
 	}
@@ -131,6 +131,33 @@ serveStaticFile(HttpdConnData *connData, const char* filepath) {
 			// If this is a folder, look for index file
 			file = tryOpenIndex(filepath);
 			if (file == NULL) return HTTPD_CGI_NOTFOUND;
+
+			// A file was found by tryOpenIndex, but we should require a 
+			//   trailing slash so clients can properly resolve relative paths. 
+			//   I.e. "GET /hello" should redirect to "/hello/"
+			//   because /hello/index.html might require "./app.js", 
+			//   which should resolve to "/hello/app.js", NOT "/app.js"
+			// The exception to this is the root directory does not require a trailing slash. 
+			//   I.e. "GET myapp.com" can serve "/index.html"
+			size_t url_len = strlen(filepath);
+			if((url_len > 0) && (filepath[url_len - 1] != '/')) {
+				espfs_fclose(file); // not serving the file this time
+				const size_t fnameBufSize = 100;
+				char fname[fnameBufSize];
+
+				// do we have enough space to add a trailing '/'?
+				// -1 to leave space for a trailing null
+				if((url_len + 1) >= (sizeof(fname) - 1))
+				{
+					ESP_LOGE(TAG, "fname too small");
+				} else
+				{
+					strcpy(fname, filepath);
+					strcat(fname, "/");
+					httpdRedirect(connData, fname);
+					return HTTPD_CGI_DONE;
+				}
+			}
 		}
 
 		// The gzip checking code is intentionally without #ifdefs because checking

@@ -20,7 +20,7 @@ Websocket support for esphttpd. Inspired by https://github.com/dangrie158/ESP-82
 #include "libesphttpd_base64.h"
 #include "libesphttpd/cgiwebsocket.h"
 
-#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
+//#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
 #include "esp_log.h"
 const static char* TAG = "cgiwebsocket";
 
@@ -85,7 +85,6 @@ struct WebsockPriv {
 	struct WebsockFrame fr;
 	uint8_t maskCtr;
 	uint8 frameCont;
-	uint8 closedHere;
 	int wsStatus;
 };
 
@@ -121,26 +120,8 @@ static void ICACHE_FLASH_ATTR wsListUnlock(void)
 	xSemaphoreGiveRecursive(wsListMutex);
 }
 
-
-/* Get a reference counted pointer to a Websock object by index. *\
-\* Must be released via put_websock()!                           */
-static struct Websock *get_websock(unsigned int index)
-{
-	Websock *ws = NULL;
-	if ((index < WEBSOCK_LIST_SIZE) && (NULL != wsList[index]))
-	{
-		if (wsListLock())
-		{
-			if (wsList[index] != NULL) // double check for NULL now that we have the lock
-			{
-				ws = wsList[index];
-				kref_get(&(ws->ref_cnt));
-			}
-			wsListUnlock();
-		}
-	}
-
-	return ws;
+static bool check_websock_closed(Websock *ws) {
+    return ((NULL == ws->conn) || (ws->conn->isConnectionClosed));
 }
 
 /* Free data, must only be called by kref_put()! */
@@ -150,11 +131,9 @@ static void ICACHE_FLASH_ATTR free_websock(struct kref *ref)
 	Websock *ws;
 
 	ws = kcontainer_of(ref, Websock, ref_cnt);
-	if (ws->closeCb) ws->closeCb(ws);
 	if (ws->priv) free(ws->priv);
 	// Note we don't free ws->conn, since it is managed by the httpd instance.
 	free(ws);
-	// still need to NULL the pointer in the list
 }
 
 /* Drop a reference to a Websock, possibly freeing it. */
@@ -162,6 +141,38 @@ static void put_websock(Websock *ws)
 {
 	assert(ws != NULL);
 	kref_put(&(ws->ref_cnt), free_websock);
+}
+
+/* Get a reference counted pointer to a Websock object by index. *\
+\* Must be released via put_websock()!                           */
+static struct Websock *get_websock(unsigned int index)
+{
+	Websock *retWs = NULL;
+	if ((index < WEBSOCK_LIST_SIZE) && 
+		(NULL != wsList[index])) // do an early NULL check to avoid locking an empty slot
+	{
+		if (wsListLock())
+		{
+			if (wsList[index] != NULL) // double check for NULL now that we have the lock
+			{
+				// check if the websocket is closed and remove it from the list
+				// (Optional to do it here, since it is also done in wsListAddAndGC) 
+				if (check_websock_closed(wsList[index])) {
+					ESP_LOGD(TAG, "Cleaning up websocket %p", wsList[index]);
+					put_websock(wsList[index]); // decrement reference count for the ref in the list
+					wsList[index] = NULL; // remove from list
+					// will return NULL to indicate closed
+				} else { 	
+					// ws is still open
+					retWs = wsList[index];
+					// increment reference count, since we will be retuning a pointer to it
+					kref_get(&(retWs->ref_cnt));
+				}
+			}
+			wsListUnlock();
+		}
+	}
+	return retWs;
 }
 
 // Add websocket to list, and garbage collect dead websockets
@@ -173,7 +184,7 @@ static void ICACHE_FLASH_ATTR wsListAddAndGC(Websock *ws)
 		// Garbage collection
 		for (int i = 0; i < WEBSOCK_LIST_SIZE; i++) {
 			if (wsList[i] != NULL) {
-				if (wsList[i]->conn->isConnectionClosed) {
+				if (check_websock_closed(wsList[i])) {
 					ESP_LOGD(TAG, "Cleaning up websocket %p", wsList[i]);
 					put_websock(wsList[i]); // decrement reference count
 					wsList[i] = NULL;
@@ -235,12 +246,12 @@ int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, co
 	// add FIN to last frame
 	if (!(flags&WEBSOCK_FLAG_MORE)) fl|=FLAG_FIN;
 
-    if (ws->conn->isConnectionClosed) {
-        ESP_LOGE(TAG, "Websocket closed, cannot send");
-        return WEBSOCK_CLOSED;
-    }
-
 	httpdPlatLock(pInstance);
+	if (check_websock_closed(ws)) {
+		ESP_LOGE(TAG, "Websocket closed, cannot send");
+		httpdPlatUnlock(pInstance);
+		return WEBSOCK_CLOSED;
+	}
 	sendFrameHead(ws, fl, len);
 	if (len!=0) r=httpdSend(ws->conn, data, len);
 	httpdFlushSendBuffer(pInstance, ws->conn);
@@ -250,27 +261,28 @@ int ICACHE_FLASH_ATTR cgiWebsocketSend(HttpdInstance *pInstance, Websock *ws, co
 
 //Broadcast data to all websockets at a specific url. Returns the amount of connections sent to.
 int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *resource, char *data, int len, int flags) {
-	int ret=0;
+	int ret = 0;
 
-	for (int i=0; i<WEBSOCK_LIST_SIZE; i++) {
-		Websock *lw = get_websock(i); // get a reference counted pointer to the Websock object
-		if (NULL != lw){
+	for (int i = 0; i < WEBSOCK_LIST_SIZE; i++) {
+		Websock *ws = get_websock(i); // get a reference counted pointer to the Websock object from the list
+		if (NULL != ws) {
+			httpdPlatLock(pInstance); // lock needed so we can access the connData to check for routeMatch
+			if (check_websock_closed(ws)) {
+				ESP_LOGD(TAG, "Websocket %p closed", ws);
+				httpdPlatUnlock(pInstance);
+				continue;
+			}
+			// else ws is still open
+			bool routeMatch = (strcmp(ws->conn->url, resource) == 0);
+			httpdPlatUnlock(pInstance);
 
-		// if ((NULL == lw->conn) || lw->conn->isConnectionClosed) {
-		//     ESP_LOGD(TAG, "Websocket %p closed", lw);
-		//     // Remove the websocket from the list
-		//     wsList[i] = NULL;
-		//     put_websock(lw); // decrement reference count for the list
-		//     continue;
-		// }
-        
-		if ((NULL != lw->conn) && strcmp(lw->conn->url, resource) == 0) {
-		cgiWebsocketSend(pInstance, lw, data, len, flags);
-		ret++;
+			if (routeMatch) {
+				cgiWebsocketSend(pInstance, ws, data, len, flags);
+				ret++;
+			}
+			put_websock(ws); // decrement reference count for local copy
 		}
-			put_websock(lw); // decrement reference count for local copy
-		}
-    }
+	}
 	if (ret == 0) {
 		ESP_LOGD(TAG, "No websockets found for resource %s", resource);
 	}
@@ -284,10 +296,13 @@ int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *
 void ICACHE_FLASH_ATTR cgiWebsocketClose(HttpdInstance *pInstance, Websock *ws, int reason) {
 	char rs[2]={reason>>8, reason&0xff};
 	httpdPlatLock(pInstance);
-	sendFrameHead(ws, FLAG_FIN|OPCODE_CLOSE, 2);
-	httpdSend(ws->conn, rs, 2);
-	ws->priv->closedHere=1;
-	httpdFlushSendBuffer(pInstance, ws->conn);
+	if (ws->conn != NULL) {
+		sendFrameHead(ws, FLAG_FIN|OPCODE_CLOSE, 2);
+		httpdSend(ws->conn, rs, 2);
+		httpdFlushSendBuffer(pInstance, ws->conn);
+		ws->conn = NULL; // mark as closed for shared references
+        if (ws->closeCb) ws->closeCb(ws);
+	} // else already closed
 	httpdPlatUnlock(pInstance);
 }
 
@@ -377,10 +392,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConn
 				}
 			} else if ((ws->priv->fr.flags&OPCODE_MASK)==OPCODE_CLOSE) {
 				ESP_LOGD(TAG, "Got close frame");
-				if (!ws->priv->closedHere) {
-					ESP_LOGD(TAG, "Sending response close frame");
-					cgiWebsocketClose(pInstance, ws, ((data[i]<<8)&0xff00)+(data[i+1]&0xff));
-				}
+				cgiWebsocketClose(pInstance, ws, ((data[i]<<8)&0xff00)+(data[i+1]&0xff));
 				r=HTTPD_CGI_DONE;
 				break;
 			} else {
@@ -398,7 +410,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebSocketRecv(HttpdInstance *pInstance, HttpdConn
 	if (r==HTTPD_CGI_DONE) {
 		//We're going to tell the main webserver we're done. The webserver expects us to clean up by ourselves
 		//we're chosing to be done. Do so.
-		put_websock(ws); // drop reference for connData->cgiData
+		put_websock((Websock*)connData->cgiData); // drop reference for connData->cgiData
 		connData->cgiData=NULL;
 	}
 	put_websock(ws); // drop reference for local ws, possibly free it if no one else is using it
@@ -414,8 +426,8 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData) {
 		//Connection aborted. Clean up.
 		ESP_LOGD(TAG, "Cleanup");
 		if (connData->cgiData) {
-			Websock *ws=(Websock*)connData->cgiData;
-			put_websock(ws); // drop reference for connData->cgiData
+			((Websock*)connData->cgiData)->conn = NULL; // mark as closed for shared references
+			put_websock((Websock*)connData->cgiData); // drop reference for connData->cgiData
 			connData->cgiData=NULL;
 		}
 		return HTTPD_CGI_DONE;
@@ -443,13 +455,13 @@ CgiStatus ICACHE_FLASH_ATTR cgiWebsocket(HttpdConnData *connData) {
 					ESP_LOGE(TAG, "Can't allocate mem for websocket priv");
 					if (ws != NULL)
 					{
-						put_websock(ws); // drop reference
+						put_websock(ws); // drop reference to local ws
 					}
-					connData->cgiData=NULL;
 					return HTTPD_CGI_DONE;
 				}
 
-				// Store a reference to the connData, but note that ws doesn't own it.
+				// Store a reference to the connData, but note that ws doesn't own it. 
+				// We have to be careful using it because it can be freed by the httpd instance.
 				ws->conn=connData;
 				//Reply with the right headers.
 				strcat(buff, WS_GUID);

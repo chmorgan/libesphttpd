@@ -221,6 +221,14 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			    else
 			    {
 			    	ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x", state->update_partition->subtype, state->update_partition->address);
+					// Check if there is a user callback for beginning the upload
+					if (def->beforeBeginCb) {
+						CgiUploadFlashStatus status = {0};
+						status.update_partition = state->update_partition;
+						status.totalLen = connData->post.len;
+						status.received = connData->post.received;
+						def->beforeBeginCb(&status);
+					}
 
 #ifdef CONFIG_ESPHTTPD_ALLOW_OTA_FACTORY_APP
 					// hack the API to allow write to the factory partition!
@@ -284,6 +292,15 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			}
 
 			dataLen = 0;
+			// Check if there is a user callback for progress
+			if (def->progressCb) {
+				CgiUploadFlashStatus status = {0};
+				status.update_partition = state->update_partition;
+				status.totalLen = connData->post.len;
+				status.received = connData->post.received;
+				def->progressCb(&status);
+			}
+			
 		} else if (state->state==FLST_DONE) {
 			ESP_LOGE(TAG, "%d bogus bytes received after data received", dataLen);
 			//Ignore those bytes.
@@ -318,6 +335,14 @@ CgiStatus ICACHE_FLASH_ATTR cgiUploadFirmware(HttpdConnData *connData) {
 			err = esp_ota_set_boot_partition(state->update_partition);
 			if (err != ESP_OK) {
 				ESP_LOGE(TAG, "esp_ota_set_boot_partition failed! err=0x%x", err);
+			}
+			// Check if there is a user callback for end of upload
+			if (def->endCb) {
+				CgiUploadFlashStatus status = {0};
+				status.update_partition = state->update_partition;
+				status.totalLen = connData->post.len;
+				status.received = connData->post.received;
+				def->endCb(&status);
 			}
 		}
 		cJSON_AddStringToObject(jsroot, "message", state->err);

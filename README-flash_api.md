@@ -16,6 +16,7 @@ Legacy function for ESP8266 (not needed for ESP32)
 
 * __cgiUploadFirmware()__
 CGI function writes HTTP POST data to flash.
+A `CgiUploadFlashDef` must be passed as cgiArg with some options including callbacks.
 
 * __cgiRebootFirmware()__
 CGI function reboots the ESP firmware after a short time-delay.

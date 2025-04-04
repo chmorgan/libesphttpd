@@ -11,11 +11,22 @@ extern "C" {
 #endif
 
 typedef struct {
-	int type;
-	int fw1Pos;
-	int fw2Pos;
-	int fwSize;
-	const char *tagName;
+  const void *update_partition; // maybe useful info for the callback. Points to a esp_partition_t
+  int totalLen; // total length of the image in bytes
+  int received; // how much has been received so far
+} CgiUploadFlashStatus;
+
+typedef void(*CgiFlashUploadCb)(const CgiUploadFlashStatus *status);
+
+typedef struct {
+	int type; // CGIFLASH_TYPE_FW or CGIFLASH_TYPE_ESPFS
+	int fw1Pos; // not used for ESP32 FW
+	int fw2Pos; // not used for ESP32 FW
+	int fwSize; // not used for ESP32 FW
+	const char *tagName; // not used for ESP32
+	CgiFlashUploadCb beforeBeginCb; // Optional callback to be called before flash writing begins (i.e. shutdown unessary tasks)
+	CgiFlashUploadCb progressCb; // Optional callback to be called when upload progresses
+	CgiFlashUploadCb endCb; // Optional callback to be called after flash writing ends
 } CgiUploadFlashDef;
 
 CgiStatus cgiGetFirmwareNext(HttpdConnData *connData);

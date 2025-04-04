@@ -2,6 +2,7 @@
 #define CGIWEBSOCKET_H
 
 #include "httpd.h"
+#include "kref.h"
 
 #define WEBSOCK_FLAG_NONE 0
 #define WEBSOCK_FLAG_MORE (1<<0) //Set if the data is not the final data in the message; more follows
@@ -22,12 +23,12 @@ typedef void(*WsSentCb)(Websock *ws);
 typedef void(*WsCloseCb)(Websock *ws);
 
 struct Websock {
-	void *userData;
-	HttpdConnData *conn;
-	uint8_t status;
-	WsRecvCb recvCb;
-	WsSentCb sentCb;
-	WsCloseCb closeCb;
+	struct kref ref_cnt; // reference count to manage lifetime of this shared object
+	void *userData; // optional user data to attach to a Websock object, not used by the library
+	HttpdConnData *conn; // Stores a reference to the connData, but warning that we don't own it and it may be freed. 
+	WsRecvCb recvCb; // optional user callback on data recieved
+	WsSentCb sentCb; // optional user callback on data sent
+	WsCloseCb closeCb; // optional user callback on websocket close
 	WebsockPriv *priv;
 };
 

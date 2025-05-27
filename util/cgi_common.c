@@ -236,12 +236,19 @@ CgiStatus cgiResponseCommonMulti(HttpdConnData *connData, void **statepp, char *
 		}
 	}
 
-	if (statep->len_to_send <= 0 || // finished sending
-		(statepp == NULL))			// or called without state pointer (single send)
+	// if called without state pointer (single send)
+	if (NULL == statepp)
 	{
 		cgiResponseCommonMultiCleanup((void *)&statep);
 		return HTTPD_CGI_DONE;
 	}
+	// else if finished sending
+	if (statep->len_to_send <= 0)
+	{
+		cgiResponseCommonMultiCleanup(statepp);
+		return HTTPD_CGI_DONE;
+	}
+	// else still sending
 	return HTTPD_CGI_MORE;
 }
 

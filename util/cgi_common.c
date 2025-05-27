@@ -158,6 +158,7 @@ CgiStatus cgiResponseCommonMultiCleanup(void **statepp)
 		{
 			if (statep->toFree)
 			{
+				ESP_LOGD(__func__, "freeing");
 				free(statep->toFree);
 			}
 			free(statep); // clear state
@@ -238,8 +239,7 @@ CgiStatus cgiResponseCommonMulti(HttpdConnData *connData, void **statepp, char *
 	if (statep->len_to_send <= 0 || // finished sending
 		(statepp == NULL))			// or called without state pointer (single send)
 	{
-		ESP_LOGD(__func__, "freeing");
-		cgiResponseCommonMultiCleanup(statepp);
+		cgiResponseCommonMultiCleanup((void *)&statep);
 		return HTTPD_CGI_DONE;
 	}
 	return HTTPD_CGI_MORE;
